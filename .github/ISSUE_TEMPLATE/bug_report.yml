@@ -1,0 +1,38 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: PadKeys version
+      description: From the PadKeys app's About section
+      placeholder: e.g. 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and Android version
+      placeholder: e.g. Pixel 9, Android 16
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App you were typing in
+      description: Some apps handle keyboards differently; the app's name and the kind of field (search, chat, password) help.
+      placeholder: e.g. Chrome address bar
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Steps to reproduce, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: "With the phone on adb: `adb logcat -d | grep -iE \"PadKeys|InputMethod\"`. Check for anything you typed before posting."
+      render: text

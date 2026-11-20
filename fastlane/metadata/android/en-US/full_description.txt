@@ -1,0 +1,19 @@
+PadKeys is a system keyboard spun off from PadBridge's on-screen keyboard. It types into your phone's apps with the same feel.
+
+<b>Layouts</b>
+Phone (big keys, a number row, a ?123 symbols page and a slim Esc / Tab / Ctrl / Alt / arrows row), Laptop, 65%, Full and Split. One layout upright, another sideways.
+
+<b>Typing</b>
+• Flick a key up (or hold it) for its shifted character
+• Drag the space bar to move the cursor; with Shift held it selects
+• Modifiers: tap for one key, tap twice to lock, hold to chord. Ctrl + A, C, X, V, Z, Y and Ctrl + Backspace
+• Enter does what the field wants: Go, Search, Send, Next or Done
+
+<b>Suggestions</b>
+Completions from a built-in list of 40,000 common English words and corrections from your phone's spell checker. Off in password and number fields. Learning the words you type is optional, off by default, kept only on the phone and never used in incognito fields.
+
+<b>Look and feel</b>
+Material 3 Expressive keys that morph when pressed, colors from your wallpaper, light and dark, an optional realistic hardware look, and haptics tuned for phone and tablet motors.
+
+<b>Private</b>
+PadKeys has no internet permission. Nothing you type leaves the phone.

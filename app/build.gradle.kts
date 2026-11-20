@@ -1,4 +1,13 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
+
+// Release signing: put storeFile / storePassword / keyAlias / keyPassword in keystore.properties (git-ignored;
+// CI writes it from secrets). Without it, release builds come out unsigned: never publish those.
+val releaseProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasReleaseKey = releaseProps.getProperty("storeFile") != null
 
 plugins {
     id("com.android.application")
@@ -14,7 +23,16 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) create("release") {
+            storeFile = rootProject.file(releaseProps.getProperty("storeFile"))
+            storePassword = releaseProps.getProperty("storePassword")
+            keyAlias = releaseProps.getProperty("keyAlias")
+            keyPassword = releaseProps.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
@@ -30,7 +48,7 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             manifestPlaceholders["appLabel"] = "PadKeys"
-            // No release signing yet: release APKs come out unsigned.
+            if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
         }
     }
     buildFeatures { compose = true; buildConfig = true }

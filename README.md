@@ -25,6 +25,16 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
 
 PadKeys has no internet permission.
 
+## Install
+
+Download the APK from [Releases](https://github.com/spundone/padkeys/releases/latest), install it, open PadKeys
+and follow the two setup steps (turn it on in Settings › On-screen keyboards, then pick it). PadKeys has no internet
+permission, so it doesn't update itself: watch the releases, or add the repo to
+[Obtainium](https://github.com/ImranR98/Obtainium) for automatic updates.
+
+Also by the same author: [PadBridge](https://github.com/spundone/padbridge) turns your phone into a Bluetooth
+trackpad, keyboard, remote and gamepad for your computer or TV.
+
 ## Build
 
 Android Studio or the command line (JDK 17+, Android SDK with platform 37):

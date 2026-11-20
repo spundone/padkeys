@@ -1,0 +1,1 @@
+First release: PadBridge's keyboard as an Android keyboard. Phone, Laptop, 65%, Full and Split layouts, flick for symbols, space-bar cursor, Ctrl shortcuts, word suggestions (learning optional, off by default), Material 3 Expressive look, haptics. No internet permission.
