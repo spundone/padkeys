@@ -17,6 +17,9 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
   spell checker, for the word before the cursor. Off in password, number and no-suggestion fields.
 - **Learning** (opt-in, off by default): remembers words you type, only on the phone, never from passwords or fields
   that ask for no personalized learning (incognito). "Forget learned words" clears them.
+- Material 3 Expressive look: rounded tonal keys that morph toward a pill when pressed, a primary-color Enter with
+  drawn action icons, a flat toolbar row, Google Sans where the phone has it; the settings app uses a collapsing
+  large top bar, grouped list items and connected toggle groups.
 - Haptics (Auto / Rich / Basic), key preview bubbles, colors from the wallpaper and light / dark mode, optional
   "Realistic" hardware look.
 

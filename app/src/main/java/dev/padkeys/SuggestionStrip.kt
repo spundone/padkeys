@@ -10,6 +10,8 @@ import android.text.TextPaint
 import android.view.MotionEvent
 import android.view.View
 import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 
 /**
@@ -31,7 +33,7 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
     private val density = resources.displayMetrics.density
     private var words: List<String> = emptyList()
     // (Not "textSize = 17 * density" inside apply: TextPaint has its own density field, which would win.)
-    private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.textAlign = Paint.Align.CENTER; it.textSize = 17 * density }
+    private val text = TextPaint(Paint.ANTI_ALIAS_FLAG).also { it.textAlign = Paint.Align.CENTER; it.textSize = 16 * density; it.typeface = Fonts.regular }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val icon = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE; strokeWidth = 1.8f * density; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
@@ -50,9 +52,9 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
-        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (44 * density).toInt())
+        setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), (48 * density).toInt())
 
-    private val iconW get() = 48 * density
+    private val iconW get() = 52 * density
     private fun slotW() = (width - 2 * iconW) / 3f
 
     /** Which part of the strip is at [x]. */
@@ -93,34 +95,33 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         c.drawColor(C.BG)
         val h = height.toFloat()
-        // Pressed highlight.
-        if (pressed != -1) {
-            val l = when (pressed) { LAYOUT -> 0f; SETTINGS -> width - iconW; else -> iconW + pressed * slotW() }
-            val w = if (pressed == LAYOUT || pressed == SETTINGS) iconW else slotW()
-            tmp.set(l + 3 * density, 4 * density, l + w - 3 * density, h - 4 * density)
-            fill.color = C.SURFACE3
-            c.drawRoundRect(tmp, tmp.height() / 2, tmp.height() / 2, fill)
+        // Round tonal buttons at each end (secondary container), the accent container while pressed.
+        val r = 18 * density
+        for ((which, cx) in listOf(LAYOUT to iconW / 2 + 2 * density, SETTINGS to width - iconW / 2 - 2 * density)) {
+            fill.color = if (pressed == which) C.ACCENT_DIM else C.KEY_FN
+            c.drawCircle(cx, h / 2, r, fill)
+            icon.color = if (pressed == which) C.ON_ACCENT_DIM else C.ON_KEY_FN
+            if (which == LAYOUT) drawKeyboardIcon(c, cx, h / 2) else drawGear(c, cx, h / 2)
         }
-        icon.color = C.MUTED
-        drawKeyboardIcon(c, iconW / 2, h / 2)
-        drawGear(c, width - iconW / 2, h / 2)
 
-        // Words: the middle (first) one is the best guess, so it's bold, like most phone keyboards.
+        // Words: the best guess sits in the middle on a pill, like a selected chip; the others are plain text.
         val sw = slotW()
         for ((i, word) in words.withIndex()) {
             if (i >= 3) break
             val slot = slotOf(i)
             val cx = iconW + slot * sw + sw / 2
-            text.color = C.TEXT
-            text.isFakeBoldText = i == 0
-            val s = TextUtils.ellipsize(word, text, sw - 12 * density, TextUtils.TruncateAt.END).toString()
+            text.typeface = if (i == 0) Fonts.medium else Fonts.regular
+            val s = TextUtils.ellipsize(word, text, sw - 28 * density, TextUtils.TruncateAt.END).toString()
+            val tw = text.measureText(s)
+            val isPressed = pressed == slot
+            if (i == 0 || isPressed) {
+                val pw = max(tw + 32 * density, min(sw - 8 * density, 72 * density))
+                tmp.set(cx - pw / 2, 6 * density, cx + pw / 2, h - 6 * density)
+                fill.color = if (isPressed) C.ACCENT_DIM else C.KEY
+                c.drawRoundRect(tmp, tmp.height() / 2, tmp.height() / 2, fill)
+            }
+            text.color = if (isPressed) C.ON_ACCENT_DIM else C.TEXT
             c.drawText(s, cx, h / 2 - (text.ascent() + text.descent()) / 2, text)
-        }
-        // Dividers between the word slots.
-        fill.color = C.STROKE
-        for (i in 1..2) {
-            val x = iconW + i * sw
-            if (words.size > 1) c.drawRect(x - density / 2, h * 0.3f, x + density / 2, h * 0.7f, fill)
         }
     }
 
@@ -130,10 +131,10 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
 
     /** A small keyboard: outline with two rows of dots and a space bar. */
     private fun drawKeyboardIcon(c: Canvas, cx: Float, cy: Float) {
-        val w = 22 * density; val h = 15 * density
+        val w = 18 * density; val h = 12.5f * density
         tmp.set(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)
         c.drawRoundRect(tmp, 3 * density, 3 * density, icon)
-        fill.color = C.MUTED
+        fill.color = icon.color
         for (row in 0..1) for (col in 0..3) {
             val x = cx - w / 2 + (col + 1) * w / 5
             val y = cy - h / 2 + (row + 1) * h / 4.2f
@@ -144,13 +145,13 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
 
     /** A gear: a ring with eight teeth. */
     private fun drawGear(c: Canvas, cx: Float, cy: Float) {
-        val r = 6.5f * density
+        val r = 5f * density
         c.drawCircle(cx, cy, r, icon)
-        c.drawCircle(cx, cy, 2.4f * density, icon)
+        c.drawCircle(cx, cy, 1.9f * density, icon)
         for (i in 0 until 8) {
             val a = i * Math.PI / 4
             val x0 = cx + (r + 0.8f * density) * cos(a).toFloat(); val y0 = cy + (r + 0.8f * density) * sin(a).toFloat()
-            val x1 = cx + (r + 3.2f * density) * cos(a).toFloat(); val y1 = cy + (r + 3.2f * density) * sin(a).toFloat()
+            val x1 = cx + (r + 2.6f * density) * cos(a).toFloat(); val y1 = cy + (r + 2.6f * density) * sin(a).toFloat()
             c.drawLine(x0, y0, x1, y1, icon)
         }
     }

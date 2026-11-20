@@ -39,12 +39,14 @@ object Real {
             C.STROKE = 0xFF4A4B51.toInt(); C.ACCENT = 0xFFAEAEB2.toInt(); C.ON_ACCENT = 0xFF000000.toInt()
             C.ACCENT_DIM = 0xFF3A3A3C.toInt(); C.ON_ACCENT_DIM = 0xFFF2F2F7.toInt()
             C.TEXT = 0xFFEDEDF0.toInt(); C.MUTED = 0xFFA1A1A6.toInt()
+            C.KEY_FN = 0xFF3A3B40.toInt(); C.ON_KEY_FN = 0xFFEDEDF0.toInt()
         } else {
             C.BG = 0xFFDADBDF.toInt()
             C.SURFACE = 0xFFE6E7EA.toInt(); C.SURFACE2 = 0xFFF3F3F6.toInt(); C.SURFACE3 = 0xFFC9CACF.toInt()
             C.STROKE = 0xFFB7B8BE.toInt(); C.ACCENT = 0xFF6E6E73.toInt(); C.ON_ACCENT = 0xFFFFFFFF.toInt()
             C.ACCENT_DIM = 0xFFE5E5EA.toInt(); C.ON_ACCENT_DIM = 0xFF1C1C1E.toInt()
             C.TEXT = 0xFF1D1D1F.toInt(); C.MUTED = 0xFF6E6E73.toInt()
+            C.KEY_FN = 0xFFFDFDFE.toInt(); C.ON_KEY_FN = 0xFF1D1D1F.toInt()
         }
     }
 

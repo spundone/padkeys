@@ -26,6 +26,38 @@ object C {
     var TEXT = 0xFFE1E1EF.toInt()
     var MUTED = 0xFFC4C5D6.toInt()
     var OK = 0xFF7DDC9A.toInt()
+    /** Character keys: the brightest surface in light mode, the highest container in dark (Gboard-like M3E). */
+    var KEY = 0xFF32343F.toInt()
+    /** Function keys (Shift, Backspace, ?123, Tab…): the secondary container, a tonal step from the letters. */
+    var KEY_FN = 0xFF3A456E.toInt()
+    var ON_KEY_FN = 0xFFDCE1FF.toInt()
+    /** The Enter key: the primary color, the one strong accent on the keyboard. */
+    var ACTION = 0xFFB7C4FF.toInt()
+    var ON_ACTION = 0xFF002682.toInt()
+}
+
+/** Blend two ARGB colors: [t] = 0 gives [a], 1 gives [b]. */
+fun lerpColor(a: Int, b: Int, t: Float): Int {
+    fun ch(s: Int) = (((a shr s) and 0xFF) + (((b shr s) and 0xFF) - ((a shr s) and 0xFF)) * t).toInt().coerceIn(0, 255) shl s
+    return ch(24) or ch(16) or ch(8) or ch(0)
+}
+
+/**
+ * The keyboard's typeface: Google Sans where the phone has it (Pixels and other Google-font phones), the system sans
+ * otherwise. Taken from the system at run time, never bundled.
+ */
+object Fonts {
+    private fun family(name: String, weight: Int): android.graphics.Typeface? {
+        val t = android.graphics.Typeface.create(name, android.graphics.Typeface.NORMAL)
+        if (t == android.graphics.Typeface.DEFAULT) return null // the family doesn't exist here
+        return if (Build.VERSION.SDK_INT >= 28) android.graphics.Typeface.create(t, weight, false) else t
+    }
+    val regular: android.graphics.Typeface by lazy {
+        family("google-sans-text", 400) ?: family("google-sans", 400) ?: android.graphics.Typeface.create("sans-serif", android.graphics.Typeface.NORMAL)
+    }
+    val medium: android.graphics.Typeface by lazy {
+        family("google-sans-text", 500) ?: family("google-sans", 500) ?: android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+    }
 }
 
 fun Context.dp(v: Float): Float = v * resources.displayMetrics.density

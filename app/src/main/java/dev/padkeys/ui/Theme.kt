@@ -17,6 +17,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import dev.padkeys.C
@@ -140,5 +141,11 @@ internal fun syncViewColors(s: ColorScheme) {
     C.ON_ACCENT_DIM = s.onPrimaryContainer.toArgb()
     C.TEXT = s.onSurface.toArgb()
     C.MUTED = s.onSurfaceVariant.toArgb()
+    val dark = s.surface.luminance() < 0.5f
+    C.KEY = (if (dark) s.surfaceContainerHighest else s.surfaceContainerLowest).toArgb()
+    C.KEY_FN = s.secondaryContainer.toArgb()
+    C.ON_KEY_FN = s.onSecondaryContainer.toArgb()
+    C.ACTION = s.primary.toArgb()
+    C.ON_ACTION = s.onPrimary.toArgb()
     Real.applyColors()
 }

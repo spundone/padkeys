@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -120,11 +122,14 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     private val deckRect = RectF()
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
-    private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
-    private val ledPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Fonts.regular }
+    private val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Fonts.medium }
+    private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Fonts.medium }
+    private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeWidth = 1.9f; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+    }
     private val bubblePaint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val bubbleText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; isFakeBoldText = true }
+    private val bubbleText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER; typeface = Fonts.medium }
     private val bubble = RectF()
 
     /** Show an enlarged label above the pressed key (fingers hide small keys). Drawn by the parent, see [drawBubbles]. */
@@ -311,7 +316,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         // Rows are a comfortable thumb height; the whole keyboard never takes more than about half the screen,
         // so the app keeps room for the text being typed.
-        val rowDp = if (layout == KbLayout.PHONE) 54f else 48f
+        val rowDp = if (layout == KbLayout.PHONE) 56f else 48f
         val want = gridH * rowDp * density * heightScale
         val cap = screenH * min(0.65f, (if (landscape) 0.5f else 0.48f) * heightScale)
         setMeasuredDimension(w, min(want, max(cap, 120 * density)).toInt())
@@ -321,15 +326,19 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     private fun layoutKeys() {
         if (width == 0 || keys.isEmpty()) return
-        val gap = 4 * density
-        unitW = (width - gap) / gridW
-        unitH = (height - gap) / gridH
+        // Airy M3E spacing: wider gaps between rows than between keys, a small margin all round.
+        val gx = (if (gridW > 12) 4f else 5.5f) * density
+        val gy = 7 * density
+        val side = 3 * density
+        unitW = (width - 2 * side - gx) / gridW
+        unitH = (height - gy) / gridH
         for (k in keys) {
-            k.rect.set(gap + k.gx * unitW, gap + k.gy * unitH, (k.gx + k.w) * unitW, (k.gy + k.h) * unitH)
+            k.rect.set(side + gx + k.gx * unitW, gy + k.gy * unitH, side + (k.gx + k.w) * unitW, (k.gy + k.h) * unitH)
         }
         val ref = minOf(unitH, unitW * 1.1f)
-        labelPaint.textSize = (ref * 0.42f).coerceAtMost(24 * density)
+        labelPaint.textSize = (ref * 0.44f).coerceAtMost(25 * density)
         subPaint.textSize = (ref * 0.29f).coerceAtMost(15 * density)
+        hintPaint.textSize = (ref * 0.23f).coerceAtMost(12 * density)
         bubbleText.textSize = (ref * 0.62f).coerceAtMost(34 * density)
     }
 
@@ -557,14 +566,107 @@ class KeyboardView(ctx: Context) : View(ctx) {
         private const val SPLIT_GAP = 2f
         /** Placeholder label for Enter; replaced by [enterLabel] when drawn. */
         private const val ENTER = "\u0000enter"
+        /** How long a released key takes to ease back from its pressed shape. */
+        private const val RELEASE_MS = 220f
     }
 
     // ------------------------------------------------------------------ drawing
+    //
+    // Material 3 Expressive, in the spirit of Gboard on recent Pixels: rounded tonal keys on the container color,
+    // function keys a tonal step darker (secondary container), Enter the one primary-colored key, and Phone's top
+    // row a flat toolbar. A pressed key morphs toward a pill and eases back when let go.
+
+    /** How a key is colored and shaped. */
+    private enum class Role { LETTER, FUNCTION, ACTION, TOOLBAR }
+
+    private fun roleOf(k: Key) = when {
+        layout == KbLayout.PHONE && k.h < 1f -> Role.TOOLBAR
+        k.code == KeyEvent.KEYCODE_ENTER -> Role.ACTION
+        k.code == KeyEvent.KEYCODE_SPACE -> Role.LETTER
+        k.isModifier || k.small || k.code == KeyEvent.KEYCODE_DEL || (k.repeat && k.code != 0) -> Role.FUNCTION
+        else -> Role.LETTER
+    }
+
+    /** Drawn icons, so the important keys don't depend on what the font has. */
+    private enum class Icon { BACKSPACE, SHIFT, SHIFT_ON, CAPS_LOCK, RETURN, ARROW, ARROW_BACK, ARROW_UP, ARROW_DOWN, SEARCH, CHECK, SEND }
+
+    private fun iconFor(k: Key): Icon? = when {
+        k.code == KeyEvent.KEYCODE_DEL && !fnActive -> Icon.BACKSPACE
+        k.mod and KeyEvent.META_SHIFT_ON != 0 -> when {
+            shiftLocked() || capsLock -> Icon.CAPS_LOCK
+            modState[k] == ModState.ONESHOT || modHeld[k] == true || autoShift -> Icon.SHIFT_ON
+            else -> Icon.SHIFT
+        }
+        fnActive && k.fnLabel != null -> null // Fn shows Home / End / PgUp… as text
+        k.code == KeyEvent.KEYCODE_DPAD_LEFT -> Icon.ARROW_BACK
+        k.code == KeyEvent.KEYCODE_DPAD_RIGHT -> Icon.ARROW
+        k.code == KeyEvent.KEYCODE_DPAD_UP -> Icon.ARROW_UP
+        k.code == KeyEvent.KEYCODE_DPAD_DOWN -> Icon.ARROW_DOWN
+        k.code == KeyEvent.KEYCODE_ENTER -> when (enterLabel) {
+            "↵" -> Icon.RETURN
+            "Go", "Next" -> Icon.ARROW
+            "Prev" -> Icon.ARROW_BACK
+            "Search" -> Icon.SEARCH
+            "Done" -> Icon.CHECK
+            "Send" -> Icon.SEND
+            else -> null // the app's own action label, drawn as text
+        }
+        else -> null
+    }
+
+    private val iconPath = Path()
+
+    /** Draws [icon] centered at ([cx], [cy]), [size] px across (designed on a 24-unit grid, like Material icons). */
+    private fun drawIcon(c: Canvas, icon: Icon, cx: Float, cy: Float, size: Float, color: Int) {
+        val p = iconPath
+        p.reset()
+        iconPaint.color = color
+        iconPaint.style = Paint.Style.STROKE
+        when (icon) {
+            Icon.BACKSPACE -> {
+                p.moveTo(8f, 5f); p.lineTo(19f, 5f); p.quadTo(21f, 5f, 21f, 7f); p.lineTo(21f, 17f)
+                p.quadTo(21f, 19f, 19f, 19f); p.lineTo(8f, 19f); p.lineTo(2.5f, 12f); p.close()
+                p.moveTo(11.5f, 9.5f); p.lineTo(16.5f, 14.5f); p.moveTo(16.5f, 9.5f); p.lineTo(11.5f, 14.5f)
+            }
+            Icon.SHIFT, Icon.SHIFT_ON, Icon.CAPS_LOCK -> {
+                p.moveTo(12f, 3.5f); p.lineTo(20.5f, 12f); p.lineTo(15.5f, 12f); p.lineTo(15.5f, 18f)
+                p.lineTo(8.5f, 18f); p.lineTo(8.5f, 12f); p.lineTo(3.5f, 12f); p.close()
+                if (icon != Icon.SHIFT) iconPaint.style = Paint.Style.FILL_AND_STROKE
+                if (icon == Icon.CAPS_LOCK) {
+                    drawPath(c, p, cx, cy, size)
+                    p.reset(); iconPaint.style = Paint.Style.STROKE
+                    p.moveTo(8.5f, 21.5f); p.lineTo(15.5f, 21.5f)
+                }
+            }
+            Icon.RETURN -> {
+                p.moveTo(19f, 5f); p.lineTo(19f, 11f); p.quadTo(19f, 15f, 15f, 15f); p.lineTo(5f, 15f)
+                p.moveTo(9.5f, 10.5f); p.lineTo(5f, 15f); p.lineTo(9.5f, 19.5f)
+            }
+            Icon.ARROW -> { p.moveTo(4f, 12f); p.lineTo(20f, 12f); p.moveTo(14f, 6f); p.lineTo(20f, 12f); p.lineTo(14f, 18f) }
+            Icon.ARROW_BACK -> { p.moveTo(20f, 12f); p.lineTo(4f, 12f); p.moveTo(10f, 6f); p.lineTo(4f, 12f); p.lineTo(10f, 18f) }
+            Icon.ARROW_UP -> { p.moveTo(12f, 20f); p.lineTo(12f, 4f); p.moveTo(6f, 10f); p.lineTo(12f, 4f); p.lineTo(18f, 10f) }
+            Icon.ARROW_DOWN -> { p.moveTo(12f, 4f); p.lineTo(12f, 20f); p.moveTo(6f, 14f); p.lineTo(12f, 20f); p.lineTo(18f, 14f) }
+            Icon.SEARCH -> { p.addCircle(10.5f, 10.5f, 6f, Path.Direction.CW); p.moveTo(15f, 15f); p.lineTo(20f, 20f) }
+            Icon.CHECK -> { p.moveTo(5f, 12.5f); p.lineTo(9.5f, 17f); p.lineTo(19f, 7.5f) }
+            Icon.SEND -> {
+                p.moveTo(3.5f, 19.5f); p.lineTo(21f, 12f); p.lineTo(3.5f, 4.5f); p.lineTo(6f, 12f); p.close()
+                p.moveTo(6f, 12f); p.lineTo(12f, 12f)
+            }
+        }
+        drawPath(c, p, cx, cy, size)
+    }
+
+    private fun drawPath(c: Canvas, p: Path, cx: Float, cy: Float, size: Float) {
+        c.save()
+        c.translate(cx - size / 2, cy - size / 2)
+        c.scale(size / 24f, size / 24f)
+        c.drawPath(p, iconPaint)
+        c.restore()
+    }
 
     private fun labelFor(k: Key, flicked: Boolean = false): String {
         if (k.label == ENTER) return enterLabel
         if (k.code == CODE_SYMBOLS || k.code == CODE_LETTERS) return k.label
-        if (k.mod and KeyEvent.META_SHIFT_ON != 0 && (shiftLocked() || capsLock)) return "⇪"
         val fn = fnActive
         if (fn && k.fnLabel != null) return k.fnLabel
         if (k.isText) return textFor(k, flicked)
@@ -574,61 +676,97 @@ class KeyboardView(ctx: Context) : View(ctx) {
     private fun isPressed(k: Key) = pointerKeys.containsValue(k) || modHeld[k] == true ||
         pending.values.any { it.k === k } || heldDone.containsValue(k)
 
+    /** Press morph per key: 1 while held, easing back to 0 after release. */
+    private val press = HashMap<Key, Float>()
+    private var lastFrame = 0L
+
     override fun onDraw(c: Canvas) {
-        val r = 9 * density
         val shift = activeMods() and KeyEvent.META_SHIFT_ON != 0
         val fn = fnActive
         val real = Real.active
+        val now = SystemClock.uptimeMillis()
+        val dt = if (lastFrame == 0L) 16f else (now - lastFrame).coerceIn(0, 64).toFloat()
+        lastFrame = now
+        var animating = false
         // Realistic: the keys sit in an aluminum (or space black) deck.
         if (real) { deckRect.set(0f, 0f, width.toFloat(), height.toFloat()); Real.deck(c, deckRect, 14 * density, density) }
         for (k in keys) {
             val pressed = isPressed(k)
+            var p = press[k] ?: 0f
+            if (pressed) p = 1f else if (p > 0f) { p = max(0f, p - dt / RELEASE_MS); animating = true }
+            if (p == 0f) press.remove(k) else press[k] = p
+            val e = p * p * (3 - 2 * p) // smoothstep
+
             val st = modState[k] ?: ModState.OFF
             val locked = st == ModState.LOCKED || (k.code == KeyEvent.KEYCODE_CAPS_LOCK && capsLock)
+            val oneShot = st == ModState.ONESHOT || (autoShift && k.mod and KeyEvent.META_SHIFT_ON != 0 && !shift)
+            val role = roleOf(k)
             val label = labelFor(k)
-            val smallText = (k.small || label.length > 2) && label != "↵"
+            val icon = iconFor(k)
+            val smallText = k.small || label.length > 2 || role == Role.TOOLBAR
             val paint = if (smallText) subPaint else labelPaint
+            val textColor: Int
             val cy: Float
             if (real) {
-                Real.key(c, k.rect, r * 0.75f, density, pressed, k.isModifier || k.small)
-                paint.color = if (k.small) C.MUTED else C.TEXT
+                Real.key(c, k.rect, 7 * density, density, pressed, k.isModifier || k.small)
+                textColor = if (k.small) C.MUTED else C.TEXT
                 cy = Real.capCenterY(k.rect, density, pressed)
                 // Status lights: Caps Lock, and latched (locked / one-shot) modifiers.
                 if (k.code == KeyEvent.KEYCODE_CAPS_LOCK) Real.led(c, k.rect.left + 8 * density, k.rect.top + 8 * density, density, capsLock)
                 else if (st != ModState.OFF) Real.led(c, k.rect.left + 8 * density, k.rect.top + 8 * density, density, true, st == ModState.ONESHOT)
             } else {
-                keyPaint.color = when {
-                    pressed || locked -> C.ACCENT
-                    st == ModState.ONESHOT -> C.ACCENT_DIM
-                    k.isModifier || k.small || k.code == KeyEvent.KEYCODE_DEL -> C.SURFACE2
-                    else -> C.SURFACE3
+                // Resting color and text by role; latched modifiers take the accent (locked) or its container (one-shot).
+                var fill: Int; var ink: Int
+                when {
+                    locked -> { fill = C.ACTION; ink = C.ON_ACTION }
+                    oneShot -> { fill = C.ACCENT_DIM; ink = C.ON_ACCENT_DIM }
+                    role == Role.LETTER -> { fill = C.KEY; ink = C.TEXT }
+                    role == Role.FUNCTION -> { fill = C.KEY_FN; ink = C.ON_KEY_FN }
+                    role == Role.ACTION -> { fill = C.ACTION; ink = C.ON_ACTION }
+                    else -> { fill = 0; ink = C.MUTED } // toolbar: no key cap
                 }
-                val kr = if (pressed) r * 2.2f else r
-                c.drawRoundRect(k.rect, kr, kr, keyPaint)
-                paint.color = when {
-                    pressed || locked -> C.ON_ACCENT
-                    st == ModState.ONESHOT -> C.ON_ACCENT_DIM
-                    k.small -> C.MUTED
-                    else -> C.TEXT
+                val pressFill = when (role) {
+                    Role.ACTION -> lerpColor(C.ACTION, C.ON_ACTION, 0.2f)
+                    Role.TOOLBAR -> C.KEY_FN
+                    else -> if (locked) lerpColor(C.ACTION, C.ON_ACTION, 0.2f) else C.ACCENT_DIM
                 }
+                if (e > 0f) {
+                    fill = if (fill == 0) (pressFill and 0x00FFFFFF) or ((0xFF * e).toInt() shl 24) else lerpColor(fill, pressFill, e)
+                    if (!locked && role != Role.ACTION) ink = lerpColor(ink, if (role == Role.TOOLBAR) C.ON_KEY_FN else C.ON_ACCENT_DIM, e)
+                }
+                // Shape: rounded rectangle at rest (Enter and space are pills), morphing toward a pill when pressed,
+                // and squeezing in a little, like a soft button.
+                val short = min(k.rect.width(), k.rect.height())
+                val rest = when (role) {
+                    Role.ACTION -> short / 2
+                    Role.TOOLBAR -> short / 2
+                    else -> if (k.code == KeyEvent.KEYCODE_SPACE) short / 2 else short * 0.3f
+                }
+                val radius = rest + (short / 2 - rest) * e
+                val squeeze = 1.2f * density * e
+                tmpRect.set(k.rect); tmpRect.inset(squeeze, squeeze)
+                if (fill != 0) { keyPaint.color = fill; c.drawRoundRect(tmpRect, radius, radius, keyPaint) }
+                textColor = ink
                 cy = k.rect.centerY()
-                if (k.code == KeyEvent.KEYCODE_CAPS_LOCK) {
-                    ledPaint.color = if (capsLock) C.OK else C.STROKE
-                    c.drawCircle(k.rect.left + 8 * density, k.rect.top + 8 * density, 3 * density, ledPaint)
-                }
             }
-            c.drawText(label, k.rect.centerX(), cy - (paint.ascent() + paint.descent()) / 2, paint)
+            if (icon != null) {
+                val size = min(min(k.rect.height(), k.rect.width()) * (if (role == Role.TOOLBAR) 0.42f else 0.5f), 24 * density)
+                drawIcon(c, icon, k.rect.centerX(), cy, size, textColor)
+            } else if (label.isNotBlank()) {
+                paint.color = textColor
+                c.drawText(label, k.rect.centerX(), cy - (paint.ascent() + paint.descent()) / 2, paint)
+            }
 
             // The flick character, small in the corner, on keys tall enough to show it.
             if (!k.isLetter && k.isText && k.shiftLabel != null && !shift && !fn && flick && k.rect.height() > 34 * density) {
-                subPaint.color = C.MUTED
-                val old = subPaint.textSize
-                subPaint.textSize = old * 0.8f
-                c.drawText(k.shiftLabel, k.rect.right - subPaint.textSize * 0.7f, k.rect.top + subPaint.textSize + 2 * density, subPaint)
-                subPaint.textSize = old
+                hintPaint.color = if (real) C.MUTED else lerpColor(C.MUTED, C.KEY, 0.25f)
+                c.drawText(k.shiftLabel, k.rect.right - hintPaint.textSize * 0.75f, k.rect.top + hintPaint.textSize + 3 * density, hintPaint)
             }
         }
+        if (animating) postInvalidateOnAnimation() else lastFrame = 0L
     }
+
+    private val tmpRect = RectF()
 
     /**
      * Preview bubbles for pressed (and waiting) character keys, drawn by the parent above the finger, offset by
@@ -641,13 +779,17 @@ class KeyboardView(ctx: Context) : View(ctx) {
         for ((k, flicked) in bubbles) {
             if (k.small || !k.isText) continue
             val label = labelFor(k, flicked)
-            val w = max(k.rect.width() * 1.3f, bubbleText.measureText(label) + 24 * density)
-            val h = k.rect.height() * 1.15f
-            val top = max(-dy, k.rect.top - h - 6 * density)
+            val w = max(k.rect.width() * 1.35f, bubbleText.measureText(label) + 28 * density)
+            val h = k.rect.height() * 1.2f
+            val top = max(-dy, k.rect.top - h - 8 * density)
             val left = (k.rect.centerX() - w / 2).coerceIn(0f, width - w)
             bubble.set(left + dx, top + dy, left + w + dx, top + h + dy)
+            val radius = min(w, h) * 0.42f
+            // A soft shadow under the bubble, so it floats above the keys.
+            bubblePaint.color = 0x33000000
+            c.drawRoundRect(bubble.left, bubble.top + 2 * density, bubble.right, bubble.bottom + 2 * density, radius, radius, bubblePaint)
             bubblePaint.color = C.ACCENT_DIM
-            c.drawRoundRect(bubble, h / 3, h / 3, bubblePaint)
+            c.drawRoundRect(bubble, radius, radius, bubblePaint)
             bubbleText.color = C.ON_ACCENT_DIM
             c.drawText(label, bubble.centerX(), bubble.centerY() - (bubbleText.ascent() + bubbleText.descent()) / 2, bubbleText)
         }
