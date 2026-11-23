@@ -29,6 +29,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Backspace
+import androidx.compose.material.icons.rounded.ContentPaste
+import androidx.compose.material.icons.rounded.Dialpad
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.PanTool
+import androidx.compose.material.icons.rounded.Spellcheck
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Gavel
@@ -95,6 +103,7 @@ import dev.padkeys.KbLayout
 import dev.padkeys.PadKeysService
 import dev.padkeys.Predict
 import dev.padkeys.Prefs
+import dev.padkeys.Voice
 
 /** This app's keyboard, as Android names it ("dev.padkeys/.PadKeysService"). */
 private fun Context.imeId() = ComponentName(this, PadKeysService::class.java).flattenToShortString()
@@ -294,6 +303,8 @@ private enum class TestField(val label: String, val options: KeyboardOptions, va
     MESSAGE("Message", KeyboardOptions(capitalization = KeyboardCapitalization.Sentences), singleLine = false),
     SEARCH("Search", KeyboardOptions(imeAction = ImeAction.Search)),
     NUMBER("Number", KeyboardOptions(keyboardType = KeyboardType.Number)),
+    PHONE("Phone", KeyboardOptions(keyboardType = KeyboardType.Phone)),
+    URL("URL", KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Go)),
     EMAIL("Email", KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next)),
     PASSWORD("Password", KeyboardOptions(keyboardType = KeyboardType.Password)),
 }
@@ -360,12 +371,12 @@ private fun LayoutItem(index: Int, count: Int, icon: ImageVector, title: String,
 @Composable
 private fun KeyboardSettings() {
     Section("Layout") {
-        LayoutItem(0, 3, Icons.Rounded.Smartphone, "Upright", landscape = false)
-        LayoutItem(1, 3, Icons.Rounded.StayCurrentLandscape, "Sideways", landscape = true)
+        LayoutItem(0, 5, Icons.Rounded.Smartphone, "Upright", landscape = false)
+        LayoutItem(1, 5, Icons.Rounded.StayCurrentLandscape, "Sideways", landscape = true)
         var height by remember { mutableFloatStateOf(Prefs.height) }
         SegmentedListItem(
             onClick = {},
-            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            shapes = ListItemDefaults.segmentedShapes(2, 5),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.Height) },
             supportingContent = {
@@ -373,32 +384,66 @@ private fun KeyboardSettings() {
                     valueRange = 0.7f..1.4f, steps = 13)
             },
         ) { Text("Height · ${(height * 100).toInt()}%") }
+        var hand by remember { mutableIntStateOf(if (!Prefs.oneHanded) 0 else if (Prefs.oneHandLeft) 1 else 2) }
+        SegmentedListItem(
+            onClick = {},
+            shapes = ListItemDefaults.segmentedShapes(3, 5),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.PanTool) },
+            supportingContent = {
+                Column {
+                    Text("Keys shrink to one side, with buttons to switch sides or go back to full width. Also in the toolbar")
+                    Choice(listOf("Off", "Left", "Right"), hand) { i ->
+                        hand = i
+                        if (i != 0) Prefs.oneHandLeft = i == 1
+                        Prefs.oneHanded = i != 0
+                    }
+                }
+            },
+        ) { Text("One-handed") }
+        var pad by remember { mutableStateOf(Prefs.numberPad) }
+        SwitchItem(4, 5, Icons.Rounded.Dialpad, "Number pad",
+            "A number or phone pad in number, phone and date fields", pad) { pad = it; Prefs.numberPad = it }
     }
 
     Section("Typing") {
         var flick by remember { mutableStateOf(Prefs.flick) }
-        SwitchItem(0, 4, Icons.Rounded.SwipeUp, "Flick for symbols",
-            "Flick a key up, or hold it, for the character in its corner", flick) { flick = it; Prefs.flick = it }
+        SwitchItem(0, 7, Icons.Rounded.SwipeUp, "Flick for symbols",
+            "Flick a key up for the character in its corner (or hold keys without accents)", flick) { flick = it; Prefs.flick = it }
         var cursor by remember { mutableStateOf(Prefs.spaceCursor) }
-        SwitchItem(1, 4, Icons.Rounded.SpaceBar, "Space-bar cursor",
+        SwitchItem(1, 7, Icons.Rounded.SpaceBar, "Space-bar cursor",
             "Drag along the space bar to move the cursor; hold Shift to select", cursor) { cursor = it; Prefs.spaceCursor = it }
         var preview by remember { mutableStateOf(Prefs.keyPreview) }
-        SwitchItem(2, 4, Icons.Rounded.ZoomIn, "Key previews", "A big copy of the key above your finger", preview) {
+        SwitchItem(2, 7, Icons.Rounded.ZoomIn, "Key previews", "A big copy of the key above your finger", preview) {
             preview = it; Prefs.keyPreview = it
         }
         var caps by remember { mutableStateOf(Prefs.autoCaps) }
-        SwitchItem(3, 4, Icons.Rounded.TextFields, "Capitalize sentences",
+        SwitchItem(3, 7, Icons.Rounded.TextFields, "Capitalize sentences",
             "Shift is on at the start of a sentence, where the app asks for it", caps) { caps = it; Prefs.autoCaps = it }
+        var accents by remember { mutableStateOf(Prefs.accents) }
+        SwitchItem(4, 7, Icons.Rounded.TouchApp, "Hold for accents",
+            "Hold a letter for its accents (é, ñ, ü…) and slide to one; hold the period for punctuation, the comma " +
+                "for emoji", accents) { accents = it; Prefs.accents = it }
+        var delSwipe by remember { mutableStateOf(Prefs.deleteSwipe) }
+        SwitchItem(5, 7, Icons.Rounded.Backspace, "Swipe to delete",
+            "Drag left from Backspace to select words, lift to delete them", delSwipe) { delSwipe = it; Prefs.deleteSwipe = it }
+        var dbl by remember { mutableStateOf(Prefs.doubleSpace) }
+        SwitchItem(6, 7, Icons.Rounded.MoreHoriz, "Double-space period",
+            "Two quick spaces after a word type a period and a space", dbl) { dbl = it; Prefs.doubleSpace = it }
     }
 
     Section("Suggestions") {
         var suggest by remember { mutableStateOf(Prefs.suggestions) }
-        SwitchItem(0, 3, Icons.Rounded.AutoAwesome, "Suggestions",
+        SwitchItem(0, 4, Icons.Rounded.AutoAwesome, "Suggestions",
             "Completions and spelling corrections above the keys. Never in password fields", suggest) {
             suggest = it; Prefs.suggestions = it
         }
+        var autocorrect by remember { mutableStateOf(Prefs.autocorrect) }
+        SwitchItem(1, 4, Icons.Rounded.Spellcheck, "Autocorrect",
+            "Fix a misspelled word when you finish it with a space or punctuation; Backspace right after undoes it. " +
+                "Never in password, email, web address or name fields", autocorrect) { autocorrect = it; Prefs.autocorrect = it }
         var learn by remember { mutableStateOf(Prefs.learn) }
-        SwitchItem(1, 3, Icons.Rounded.Psychology, "Learn my words",
+        SwitchItem(2, 4, Icons.Rounded.Psychology, "Learn my words",
             "Remember words you type to suggest them later. Stored only on this phone; never from passwords or " +
                 "private (incognito) fields", learn) { learn = it; Prefs.learn = it }
         var learned by remember { mutableIntStateOf(Predict.learnedCount) }
@@ -411,7 +456,7 @@ private fun KeyboardSettings() {
         var confirm by remember { mutableStateOf(false) }
         SegmentedListItem(
             onClick = { if (learned > 0) confirm = true },
-            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            shapes = ListItemDefaults.segmentedShapes(3, 4),
             colors = segColors(),
             leadingContent = {
                 Badge(Icons.Rounded.DeleteSweep, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
@@ -426,6 +471,19 @@ private fun KeyboardSettings() {
             confirmButton = { TextButton(onClick = { Predict.forget(); learned = 0; confirm = false }) { Text("Forget") } },
             dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } },
         )
+    }
+
+    Section("Toolbar") {
+        val ctx = LocalContext.current
+        var clip by remember { mutableStateOf(Prefs.clipboard) }
+        SwitchItem(0, 2, Icons.Rounded.ContentPaste, "Clipboard history",
+            "Text you copy while the keyboard is open, kept in memory until PadKeys stops; pin items to keep them. " +
+                "Fresh copies are offered above the keys. Never passwords marked sensitive", clip) { clip = it; Prefs.clipboard = it }
+        val voice = remember { Voice.find(ctx) != null }
+        var mic by remember { mutableStateOf(Prefs.voiceKey) }
+        SwitchItem(1, 2, Icons.Rounded.Mic, "Voice typing button",
+            if (voice) "Switches to your phone's voice typing keyboard, which comes back here when done"
+            else "Your phone has no voice typing keyboard turned on, so the button is hidden", mic) { mic = it; Prefs.voiceKey = it }
     }
 
     Section("Feel and look") {

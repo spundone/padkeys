@@ -45,6 +45,26 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
         if (pressed == LAYOUT) { longFired = true; Haptics.click(); listener?.onLayoutButtonLong() }
     }
 
+    /** The toolbar's buttons and the paste chip. */
+    var tools: ToolbarListener? = null
+    /** Tools shown when there are no suggestions. */
+    var toolset: List<Tool> = emptyList()
+        set(v) { if (field != v) { field = v; invalidate() } }
+    /** The tool whose panel is open: highlighted, and the toolbar stays up while it is. */
+    var activeTool: Tool? = null
+        set(v) { if (field != v) { field = v; invalidate() } }
+    private var clip: String? = null
+    private val toolbarShown get() = activeTool != null || words.isEmpty()
+    /** The paste chip sits left of the tools while there are no suggestions and no panel is open. */
+    private val chipShown get() = activeTool == null && words.isEmpty() && clip != null
+
+    /** Offer [text] (just copied) as a paste chip while there are no suggestions; null removes it. */
+    fun offerClip(text: String?) {
+        if (text == clip) return
+        clip = text
+        invalidate()
+    }
+
     fun show(list: List<String>) {
         if (list == words) return
         words = list
@@ -61,7 +81,18 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
     private fun hit(x: Float): Int = when {
         x < iconW -> LAYOUT
         x > width - iconW -> SETTINGS
+        chipShown && x < toolsLeft() -> CLIP
+        toolbarShown -> toolAt(x)?.let { TOOL + it } ?: -1
         else -> ((x - iconW) / slotW()).toInt().coerceIn(0, 2)
+    }
+
+    private fun toolsLeft() = if (chipShown) chip(tmpChip).right + 4 * density else iconW
+    private fun toolW() = min((width - iconW - toolsLeft()) / toolset.size.coerceAtLeast(1), 76 * density)
+    private fun toolX0() = toolsLeft() + (width - iconW - toolsLeft() - toolset.size * toolW()) / 2
+
+    private fun toolAt(x: Float): Int? {
+        val i = ((x - toolX0()) / toolW()).toInt()
+        return if (x >= toolX0() && i in toolset.indices) i else null
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -84,6 +115,8 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
                 when (p) {
                     LAYOUT -> listener?.onLayoutButton()
                     SETTINGS -> listener?.onSettingsButton()
+                    CLIP -> clip?.let { tools?.onClipChip(it) }
+                    in TOOL until TOOL + toolset.size -> tools?.onTool(toolset[p - TOOL])
                     else -> words.getOrNull(wordAtSlot(p))?.let { listener?.onPick(it) }
                 }
             }
@@ -103,6 +136,8 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
             icon.color = if (pressed == which) C.ON_ACCENT_DIM else C.ON_KEY_FN
             if (which == LAYOUT) drawKeyboardIcon(c, cx, h / 2) else drawGear(c, cx, h / 2)
         }
+
+        if (toolbarShown) { if (chipShown) drawClip(c); drawTools(c); return }
 
         // Words: the best guess sits in the middle on a pill, like a selected chip; the others are plain text.
         val sw = slotW()
@@ -124,6 +159,58 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
             c.drawText(s, cx, h / 2 - (text.ascent() + text.descent()) / 2, text)
         }
     }
+
+    /** Toolbar: round icon buttons, the open panel's one filled. */
+    private fun drawTools(c: Canvas) {
+        val h = height.toFloat()
+        val tw = toolW()
+        val half = min(tw / 2 - 2 * density, 26 * density)
+        for ((i, t) in toolset.withIndex()) {
+            val cx = toolX0() + tw * i + tw / 2
+            val on = activeTool == t
+            val down = pressed == TOOL + i
+            if (on || down) {
+                fill.color = if (down) C.ACCENT_DIM else C.KEY_FN
+                tmp.set(cx - half, 6 * density, cx + half, h - 6 * density)
+                c.drawRoundRect(tmp, tmp.height() / 2, tmp.height() / 2, fill)
+            }
+            Icons.draw(c, t.icon, cx, h / 2, 22 * density, if (down) C.ON_ACCENT_DIM else if (on) C.ON_KEY_FN else C.MUTED)
+        }
+    }
+
+    private val tmpChip = RectF()
+    private var chipFor: String? = null
+    private var chipText = ""
+    private var chipW = 0f
+
+    /** The paste chip's outline (left of the tools); its text is the start of the copied text, on one line. */
+    private fun chip(out: RectF): RectF {
+        val s = clip ?: ""
+        val maxW = (width - 2 * iconW) * 0.42f
+        if ("$width\u0000$s" != chipFor) {
+            text.typeface = Fonts.regular
+            val one = s.replace(whitespace, " ").trim()
+            chipText = TextUtils.ellipsize(one, text, min(maxW - 56 * density, 280 * density), TextUtils.TruncateAt.END).toString()
+            chipW = text.measureText(chipText) + 56 * density
+            chipFor = "$width\u0000$s"
+        }
+        return out.apply { set(iconW + 6 * density, 6 * density, iconW + 6 * density + chipW, height - 6 * density) }
+    }
+
+    /** The paste chip: a pill with a clipboard icon and the start of the copied text. */
+    private fun drawClip(c: Canvas) {
+        val h = height.toFloat()
+        text.typeface = Fonts.regular
+        chip(tmp)
+        fill.color = if (pressed == CLIP) C.ACCENT_DIM else C.KEY
+        c.drawRoundRect(tmp, tmp.height() / 2, tmp.height() / 2, fill)
+        val ink = if (pressed == CLIP) C.ON_ACCENT_DIM else C.TEXT
+        Icons.draw(c, Icons.Id.PASTE, tmp.left + 22 * density, h / 2, 18 * density, ink)
+        text.color = ink
+        c.drawText(chipText, tmp.left + 36 * density + text.measureText(chipText) / 2, h / 2 - (text.ascent() + text.descent()) / 2, text)
+    }
+
+    private val whitespace = Regex("\\s+")
 
     /** On screen the order is (2nd, 1st, 3rd): the best guess sits in the middle, under the thumbs. */
     private fun slotOf(word: Int) = when (word) { 0 -> 1; 1 -> 0; else -> 2 }
@@ -159,5 +246,7 @@ class SuggestionStrip(ctx: Context) : View(ctx) {
     private companion object {
         const val LAYOUT = 10
         const val SETTINGS = 11
+        const val CLIP = 12
+        const val TOOL = 20
     }
 }

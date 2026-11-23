@@ -80,6 +80,31 @@ object Predict {
         return lo < s.size && w[s[lo]] == word
     }
 
+    // ---------------------------------------------------------------- for autocorrect
+
+    /** The bundled words, most common first (empty while loading). */
+    val wordList: Array<String> get() = words
+
+    /** [word] (lowercase) was learned from the user's typing. */
+    fun isLearned(word: String) = Prefs.learn && counts().containsKey(word)
+
+    /** How common [word] (lowercase) is: its index in the word list (0 = most common), or -1 if it isn't there. */
+    fun rankOf(word: String): Int {
+        val w = words; val s = sorted
+        if (w.isEmpty()) return -1
+        var lo = 0; var hi = s.size
+        while (lo < hi) { val mid = (lo + hi) ushr 1; if (w[s[mid]] < word) lo = mid + 1 else hi = mid }
+        return if (lo < s.size && w[s[lo]] == word) s[lo] else -1
+    }
+
+    /** What the spell checker said about a word: its result attributes and first suggestion. */
+    class Verdict(val attrs: Int, val first: String?)
+
+    /** Recent spell checker answers by word (lowercase), oldest first. */
+    private val verdicts = LinkedHashMap<String, Verdict>()
+
+    fun verdict(word: String): Verdict? = verdicts[word.lowercase()]
+
     // ---------------------------------------------------------------- spell checker
 
     private fun session(): SpellCheckerSession? {
@@ -97,13 +122,19 @@ object Predict {
         override fun onGetSuggestions(results: Array<out SuggestionsInfo>?) {}
         override fun onGetSentenceSuggestions(results: Array<out SentenceSuggestionsInfo>?) {
             val found = ArrayList<String>()
+            var attrs = 0
             results?.forEach { s ->
                 for (i in 0 until s.suggestionsCount) {
                     val info = s.getSuggestionsInfoAt(i) ?: continue
+                    attrs = attrs or info.suggestionsAttributes
                     for (j in 0 until info.suggestionsCount) info.getSuggestionAt(j)?.let { found += it }
                 }
             }
             val forWord = checking.removeFirstOrNull()
+            if (forWord != null) {
+                verdicts[forWord.lowercase()] = Verdict(attrs, found.firstOrNull { ' ' !in it })
+                if (verdicts.size > 32) verdicts.remove(verdicts.keys.first())
+            }
             if (forWord != null && forWord == asked) show(forWord, found)
         }
     }

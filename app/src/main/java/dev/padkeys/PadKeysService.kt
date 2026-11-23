@@ -17,6 +17,7 @@ import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import dev.padkeys.ui.applyKeyboardColors
 
@@ -34,11 +35,21 @@ import dev.padkeys.ui.applyKeyboardColors
  * the cursor moves or the app edits the text itself.
  */
 class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionStrip.Listener,
-    SharedPreferences.OnSharedPreferenceChangeListener {
+    SharedPreferences.OnSharedPreferenceChangeListener, KeyActions, ToolbarListener, PanelListener {
 
     private var root: KeyboardRoot? = null
     private var keyboard: KeyboardView? = null
     private var strip: SuggestionStrip? = null
+    private var emojiPanel: EmojiPanel? = null
+    private var clipPanel: ClipboardPanel? = null
+    private var editPanel: EditPanel? = null
+    /** The panel shown in the keys' place, by its toolbar button (null: the keys). */
+    private var openTool: Tool? = null
+    /** The editor's selection, as last reported. */
+    private var selStart = 0
+    private var selEnd = 0
+    /** When the last space was typed (uptime), for double-space → ". ". */
+    private var lastSpaceAt = 0L
     private var field = Field.NONE
     private var info: EditorInfo? = null
     /** The selection is a range (not just a cursor): no suggestions, Backspace deletes it. */
@@ -69,10 +80,16 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     private val landscape get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     override fun onCreateInputView(): View {
-        val kb = KeyboardView(this).also { it.listener = this }
-        val st = SuggestionStrip(this).also { it.listener = this }
-        val r = KeyboardRoot(this, st, kb)
+        val kb = KeyboardView(this).also { it.listener = this; it.actions = this }
+        val st = SuggestionStrip(this).also { it.listener = this; it.tools = this }
+        val em = EmojiPanel(this).also { it.listener = this }
+        val cp = ClipboardPanel(this).also { it.listener = this }
+        val ed = EditPanel(this).also { it.listener = this }
+        val bar = OneHandBar(this, onExpand = { Prefs.oneHanded = false }, onSwap = { Prefs.oneHandLeft = !Prefs.oneHandLeft })
+        val r = KeyboardRoot(this, st, kb, listOf(em, cp, ed), bar)
         root = r; keyboard = kb; strip = st
+        emojiPanel = em; clipPanel = cp; editPanel = ed
+        openTool = null
         applySettings()
         return r
     }
@@ -90,29 +107,151 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         info = editorInfo
         field = Field.of(editorInfo)
         hasSelection = editorInfo.initialSelStart != editorInfo.initialSelEnd
+        selStart = editorInfo.initialSelStart; selEnd = editorInfo.initialSelEnd
         autoSpace = false
+        AutoCorrect.undo = null
+        lastSpaceAt = 0
+        if (!restarting) closePanel()
         applySettings()
         keyboard?.let { kb ->
             if (!restarting) kb.releaseEverything()
             kb.showSymbols(field.numeric)
+            kb.showPad(if (Prefs.numberPad) field.pad else Field.PAD_NONE)
             kb.enterLabel = field.enterLabel
         }
         Predict.listener = Predict.Listener { _, list -> strip?.show(if (suggestionsOn) list else emptyList()) }
         Predict.reset()
+        Clips.onChange = { clipPanel?.reload(); showClipOffer() }
+        Clips.start(this)
+        showClipOffer()
         refresh()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboard?.releaseEverything()
         strip?.show(emptyList())
+        strip?.offerClip(null)
+        closePanel()
+        Clips.stop()
         Predict.close()
         super.onFinishInputView(finishingInput)
+    }
+
+    // ------------------------------------------------------------------ clipboard chip
+
+    private val hideOffer = Runnable { showClipOffer() }
+
+    /** Offer what was just copied as a chip in the strip (for a minute after the copy, like Gboard). */
+    private fun showClipOffer() {
+        val st = strip ?: return
+        st.removeCallbacks(hideOffer)
+        val offer = if (field.raw || field.pad != Field.PAD_NONE && Prefs.numberPad) null else Clips.currentOffer()
+        st.offerClip(offer)
+        if (offer != null) st.postDelayed(hideOffer, Clips.offerRemaining() + 50)
+    }
+
+    override fun onClipChip(text: String) {
+        currentInputConnection?.commitText(text, 1)
+        Clips.dismissOffer()
+        showClipOffer()
+        Haptics.soft(0.4f)
+    }
+
+    // ------------------------------------------------------------------ toolbar and panels
+
+    /** The toolbar's buttons: voice only when the phone has a voice typing keyboard turned on. */
+    private fun toolset(): List<Tool> = Tool.entries.filter { it != Tool.VOICE || (Prefs.voiceKey && Voice.find(this) != null) }
+
+    override fun onTool(tool: Tool) {
+        when (tool) {
+            Tool.EMOJI, Tool.CLIPBOARD, Tool.EDIT -> if (openTool == tool) closePanel() else openPanel(tool)
+            Tool.ONE_HAND -> Prefs.oneHanded = !Prefs.oneHanded
+            Tool.VOICE -> { closePanel(); Voice.start(this) }
+        }
+    }
+
+    override fun onEmojiKey() = openPanel(Tool.EMOJI)
+
+    private fun panelFor(tool: Tool?): PanelView? = when (tool) {
+        Tool.EMOJI -> emojiPanel
+        Tool.CLIPBOARD -> clipPanel
+        Tool.EDIT -> editPanel
+        else -> null
+    }
+
+    private fun openPanel(tool: Tool) {
+        val p = panelFor(tool) ?: return
+        keyboard?.releaseEverything()
+        openTool = tool
+        p.open()
+        root?.showPanel(p)
+        strip?.activeTool = tool
+    }
+
+    private fun closePanel() {
+        if (openTool == null) return
+        openTool = null
+        root?.showPanel(null)
+        strip?.activeTool = null
+        refresh()
+    }
+
+    override fun onPanelText(text: String) {
+        val ic = currentInputConnection ?: return
+        AutoCorrect.undo = null
+        autoSpace = false
+        ic.commitText(text, 1)
+        if (openTool == Tool.CLIPBOARD) closePanel()
+    }
+
+    override fun onPanelKey(code: Int, meta: Int) = onKey(code, meta)
+
+    override fun onPanelShortcut(c: Char) {
+        val ic = currentInputConnection ?: return
+        AutoCorrect.undo = null
+        shortcut(ic, c.toString(), KeyEvent.META_CTRL_ON or KeyEvent.META_CTRL_LEFT_ON)
+    }
+
+    override fun onPanelClose() = closePanel()
+
+    // ------------------------------------------------------------------ delete-key swipe
+
+    /** Where the cursor was when the swipe started, the text before it, and how much is selected now. */
+    private var swipeAnchor = -1
+    private var swipeBefore: CharSequence = ""
+    private var swipeLen = 0
+
+    override fun onDeleteSwipe(words: Int) {
+        val ic = currentInputConnection ?: return
+        if (swipeAnchor < 0) {
+            swipeAnchor = selStart
+            swipeBefore = ic.getTextBeforeCursor(2000, 0) ?: ""
+        }
+        var len = 0
+        repeat(words) {
+            if (len < swipeBefore.length) len += Words.deleteWordLength(swipeBefore.subSequence(0, swipeBefore.length - len))
+        }
+        swipeLen = len
+        ic.setSelection(swipeAnchor - len, swipeAnchor)
+    }
+
+    override fun onDeleteSwipeEnd(delete: Boolean) {
+        val ic = currentInputConnection
+        if (ic != null && swipeAnchor >= 0) {
+            ic.beginBatchEdit()
+            ic.setSelection(swipeAnchor, swipeAnchor)
+            if (delete && swipeLen > 0) ic.deleteSurroundingText(swipeLen, 0)
+            ic.endBatchEdit()
+        }
+        swipeAnchor = -1; swipeLen = 0; swipeBefore = ""
+        AutoCorrect.undo = null
     }
 
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         hasSelection = newSelStart != newSelEnd
+        selStart = newSelStart; selEnd = newSelEnd
         if (autoSpace) {
             if (autoSpaceAt == -1) autoSpaceAt = newSelEnd else if (newSelEnd != autoSpaceAt) autoSpace = false
         }
@@ -120,7 +259,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     }
 
     override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
-        if (key == "learnedWords") return // written while typing; nothing to redraw
+        if (key == "learnedWords" || key == "recentEmoji" || key == "pinnedClips") return // written while typing
+        if (key == "clipboard" && !Prefs.clipboard) { Clips.clearRecent(); Clips.stop(); showClipOffer() }
         applySettings()
         if (key == "suggestions") { Predict.reset(); refresh() }
     }
@@ -134,6 +274,10 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         kb.spaceCursor = Prefs.spaceCursor
         kb.keyPreview = Prefs.keyPreview
         kb.heightScale = Prefs.height
+        kb.accents = Prefs.accents
+        kb.deleteSwipe = Prefs.deleteSwipe
+        strip?.toolset = toolset()
+        root?.oneHanded(Prefs.oneHanded, Prefs.oneHandLeft)
         root?.invalidateAll()
     }
 
@@ -158,15 +302,56 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         val shortcut = meta and (KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON or KeyEvent.META_META_ON) != 0
         val afterPick = autoSpace
         autoSpace = false
+        AutoCorrect.undo = null
+        val now = SystemClock.uptimeMillis()
+        val lastSpace = lastSpaceAt
+        lastSpaceAt = 0
         if (shortcut) { shortcut(ic, text, meta); return }
         if (afterPick && text.length == 1 && text[0] in ".,!?;:)" && ic.getTextBeforeCursor(1, 0)?.toString() == " ") {
             ic.deleteSurroundingText(1, 0)
         }
+        if (text == " " && doubleSpace(ic, now - lastSpace)) return
+        if (text == " ") lastSpaceAt = now
+        if (text.length == 1 && text[0] in SEPARATORS && autocorrect(ic, text)) return
         // A space or punctuation ends the word before the cursor: learn it (only if the user opted in).
         if (learning && text.isNotEmpty() && !text[0].isLetterOrDigit() && text[0] != '\'') {
             Predict.learn(Words.ending(ic.getTextBeforeCursor(48, 0)))
         }
         if (field.raw) typeAsKeys(ic, text) else ic.commitText(text, 1)
+    }
+
+    /** Two quick spaces after a word: ". " (and Shift for the next sentence, via the field's caps mode). */
+    private fun doubleSpace(ic: InputConnection, sinceLastSpace: Long): Boolean {
+        if (!Prefs.doubleSpace || !field.suggest || hasSelection || sinceLastSpace > DOUBLE_SPACE_MS) return false
+        val b = ic.getTextBeforeCursor(2, 0) ?: return false
+        if (b.length != 2 || b[1] != ' ' || !(b[0].isLetterOrDigit() || b[0] in ")\"'’")) return false
+        ic.beginBatchEdit()
+        ic.deleteSurroundingText(1, 0)
+        ic.commitText(". ", 1)
+        ic.endBatchEdit()
+        return true
+    }
+
+    /**
+     * A space or punctuation ([separator]) ends the word before the cursor: if it is misspelled and a close correction
+     * exists, type the correction instead. Backspace right after undoes it ([backspace]).
+     */
+    private fun autocorrect(ic: InputConnection, separator: String): Boolean {
+        if (!Prefs.autocorrect || !field.autocorrect || hasSelection) return false
+        val word = Words.ending(ic.getTextBeforeCursor(48, 0))
+        if (word.isEmpty()) return false
+        // In the middle of a word (the cursor was moved into it): leave it.
+        val after = ic.getTextAfterCursor(1, 0)
+        if (!after.isNullOrEmpty() && after[0].isLetterOrDigit()) return false
+        val fix = AutoCorrect.correction(word) ?: return false
+        if (fix == word) return false
+        ic.beginBatchEdit()
+        ic.deleteSurroundingText(word.length, 0)
+        ic.commitText(fix + separator, 1)
+        ic.endBatchEdit()
+        AutoCorrect.undo = AutoCorrect.Undo(word, fix, separator)
+        if (learning) Predict.learn(fix)
+        return true
     }
 
     /** Ctrl / Alt + a character key. */
@@ -194,6 +379,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     override fun onKey(code: Int, meta: Int) {
         val ic = currentInputConnection ?: return
         autoSpace = false
+        lastSpaceAt = 0
+        if (code != KeyEvent.KEYCODE_DEL) AutoCorrect.undo = null
         when (code) {
             KeyEvent.KEYCODE_DEL -> backspace(ic, meta)
             KeyEvent.KEYCODE_ENTER -> enter(ic, meta)
@@ -204,11 +391,27 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     override fun onCursor(code: Int, meta: Int) {
         val ic = currentInputConnection ?: return
         autoSpace = false
+        AutoCorrect.undo = null
+        lastSpaceAt = 0
         sendKey(ic, code, meta)
     }
 
     private fun backspace(ic: InputConnection, meta: Int) {
         if (field.raw) { sendKey(ic, KeyEvent.KEYCODE_DEL, meta); return }
+        // Right after an autocorrection: put back what was typed (once), and leave that word alone from now on.
+        val undo = AutoCorrect.undo
+        AutoCorrect.undo = null
+        if (undo != null && !hasSelection && meta and KeyEvent.META_CTRL_ON == 0) {
+            val done = undo.fixed + undo.separator
+            if (ic.getTextBeforeCursor(done.length, 0)?.toString() == done) {
+                ic.beginBatchEdit()
+                ic.deleteSurroundingText(done.length, 0)
+                ic.commitText(undo.typed + undo.separator, 1)
+                ic.endBatchEdit()
+                AutoCorrect.reject(undo.typed)
+                return
+            }
+        }
         if (hasSelection || !ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
         val before = ic.getTextBeforeCursor(64, 0)
         // Nothing before the cursor: let the app see the key (chips, "delete the empty item", etc.).
@@ -288,6 +491,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         ic.commitText("$word ", 1)
         ic.endBatchEdit()
         if (learning) Predict.learn(word)
+        AutoCorrect.undo = null
         autoSpace = true; autoSpaceAt = -1
         Haptics.soft(0.4f)
     }
@@ -306,20 +510,56 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     override fun onSettingsButton() {
         startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
+
+    private companion object {
+        /** Characters that end a word, for autocorrect. */
+        const val SEPARATORS = " .,!?;:"
+        /** Two spaces this close together type ". ". */
+        const val DOUBLE_SPACE_MS = 1100L
+    }
 }
 
 /**
  * The input view: suggestion strip over the keys. It draws the keys' preview bubbles last, over both children, so a
  * bubble for the top row can rise into the strip instead of being cut off at the keyboard's edge. It also keeps the
  * keys clear of the navigation bar on devices that draw the keyboard behind it.
+ *
+ * Under the strip, a [deck] holds the keys and the [panels] (emoji, clipboard, editing) that take their place at the
+ * same size; in one-handed mode the deck narrows to one side, with the [bar]'s buttons beside it.
  */
 @SuppressLint("ViewConstructor")
-class KeyboardRoot(ctx: Context, private val strip: SuggestionStrip, private val keyboard: KeyboardView) : LinearLayout(ctx) {
+class KeyboardRoot(
+    ctx: Context, private val strip: SuggestionStrip, private val keyboard: KeyboardView,
+    private val panels: List<View> = emptyList(), private val bar: View? = null,
+) : LinearLayout(ctx) {
+    private val deck = object : FrameLayout(ctx) {
+        // The keys ask their parent to redraw for preview bubbles and popups, which this root draws.
+        override fun invalidate() { super.invalidate(); this@KeyboardRoot.invalidate() }
+
+        // Panels take exactly the keys' size (the keys stay measured while hidden).
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            measureChild(keyboard, widthMeasureSpec, heightMeasureSpec)
+            val w = MeasureSpec.getSize(widthMeasureSpec)
+            val h = keyboard.measuredHeight
+            for (p in panels) if (p.visibility != GONE) {
+                p.measure(MeasureSpec.makeMeasureSpec(w, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(h, MeasureSpec.EXACTLY))
+            }
+            setMeasuredDimension(w, h)
+        }
+    }
+    private val row = LinearLayout(ctx)
+
     init {
         orientation = VERTICAL
         setWillNotDraw(false)
         addView(strip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-        addView(keyboard, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        deck.addView(keyboard, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        for (p in panels) {
+            p.visibility = GONE
+            deck.addView(p, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }
+        row.addView(deck, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        addView(row, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         setOnApplyWindowInsetsListener { v, insets ->
             // Android 13+ draws its own back / switch-keyboard bar inside the keyboard's window and reports it to the
             // keyboard as a caption bar, not a navigation bar.
@@ -331,12 +571,43 @@ class KeyboardRoot(ctx: Context, private val strip: SuggestionStrip, private val
         }
     }
 
-    fun invalidateAll() { invalidate(); strip.invalidate(); keyboard.invalidate() }
+    fun invalidateAll() {
+        invalidate(); strip.invalidate(); keyboard.invalidate()
+        panels.forEach { it.invalidate() }; bar?.invalidate()
+    }
+
+    /** Show [panel] in the keys' place (null: the keys). The keys stay laid out, so the panel gets their size. */
+    fun showPanel(panel: View?) {
+        for (p in panels) p.visibility = if (p === panel) VISIBLE else GONE
+        keyboard.visibility = if (panel == null) VISIBLE else INVISIBLE
+        invalidate()
+    }
+
+    private var oneHand: Boolean? = null
+    private var oneHandLeft = false
+
+    /** One-handed mode: the keys about three quarters wide (at most 420dp) on one side, the [bar] on the other. */
+    fun oneHanded(on: Boolean, left: Boolean) {
+        val b = bar ?: return
+        if (oneHand == on && oneHandLeft == left) return
+        oneHand = on; oneHandLeft = left
+        row.removeView(b)
+        if (on) {
+            val dm = resources.displayMetrics
+            val w = minOf(dm.widthPixels * 0.78f, 420 * dm.density).toInt()
+            deck.layoutParams = LayoutParams(w, LayoutParams.WRAP_CONTENT)
+            row.addView(b, if (left) 1 else 0, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
+            (b as? OneHandBar)?.keysRight = !left
+        } else {
+            deck.layoutParams = LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+        }
+    }
 
     override fun onDraw(canvas: Canvas) = canvas.drawColor(C.BG)
 
     override fun dispatchDraw(canvas: Canvas) {
         super.dispatchDraw(canvas)
-        keyboard.drawBubbles(canvas, keyboard.left.toFloat(), keyboard.top.toFloat())
+        if (keyboard.visibility == VISIBLE) keyboard.drawBubbles(canvas,
+            (row.left + deck.left + keyboard.left).toFloat(), (row.top + deck.top + keyboard.top).toFloat())
     }
 }

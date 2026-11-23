@@ -33,6 +33,21 @@ object Prefs {
         get() = p.getFloat("height", 1f)
         set(v) = p.edit().putFloat("height", v).apply()
 
+    /** One-handed mode: the keys shrink toward one side, with buttons to switch sides or go back to full width. */
+    var oneHanded: Boolean
+        get() = bool("oneHanded", false)
+        set(v) = putBool("oneHanded", v)
+
+    /** Which side the one-handed keyboard sits on. */
+    var oneHandLeft: Boolean
+        get() = bool("oneHandLeft", false)
+        set(v) = putBool("oneHandLeft", v)
+
+    /** A number pad (or phone pad) instead of the full keyboard in number, phone and date fields. */
+    var numberPad: Boolean
+        get() = bool("numberPad", true)
+        set(v) = putBool("numberPad", v)
+
     // ---------------------------------------------------------------- typing
 
     /** Flick up on a key (or hold it) to type its shifted character. */
@@ -55,6 +70,21 @@ object Prefs {
         get() = bool("autoCaps", true)
         set(v) = putBool("autoCaps", v)
 
+    /** Hold a letter for its accented forms, the period for punctuation, the comma (Phone) for emoji. */
+    var accents: Boolean
+        get() = bool("accents", true)
+        set(v) = putBool("accents", v)
+
+    /** Drag left from Backspace to select words before the cursor; lifting deletes them. */
+    var deleteSwipe: Boolean
+        get() = bool("deleteSwipe", true)
+        set(v) = putBool("deleteSwipe", v)
+
+    /** Two quick spaces after a word type ". ". */
+    var doubleSpace: Boolean
+        get() = bool("doubleSpace", true)
+        set(v) = putBool("doubleSpace", v)
+
     // ---------------------------------------------------------------- suggestions
 
     /** Word suggestions above the keys. */
@@ -74,6 +104,36 @@ object Prefs {
     var learnedWords: String
         get() = p.getString("learnedWords", "") ?: ""
         set(v) = p.edit().putString("learnedWords", v).apply()
+
+    /** Replace a misspelled word with its correction when a space or punctuation ends it. */
+    var autocorrect: Boolean
+        get() = bool("autocorrect", true)
+        set(v) = putBool("autocorrect", v)
+
+    // ---------------------------------------------------------------- toolbar
+
+    /**
+     * Clipboard history: text copied while the keyboard is showing (kept in memory only) plus pinned items, and the
+     * latest copy offered as a chip when the keyboard opens.
+     */
+    var clipboard: Boolean
+        get() = bool("clipboard", true)
+        set(v) = putBool("clipboard", v)
+
+    /** Pinned clipboard items, a JSON array of strings (stored only on the device). */
+    var pinnedClips: String
+        get() = p.getString("pinnedClips", "[]") ?: "[]"
+        set(v) = p.edit().putString("pinnedClips", v).apply()
+
+    /** Recently used emoji, most recent first, separated by spaces. */
+    var recentEmoji: String
+        get() = p.getString("recentEmoji", "") ?: ""
+        set(v) = p.edit().putString("recentEmoji", v).apply()
+
+    /** Show the microphone button when the phone has a voice typing keyboard. */
+    var voiceKey: Boolean
+        get() = bool("voiceKey", true)
+        set(v) = putBool("voiceKey", v)
 
     // ---------------------------------------------------------------- look and feel
 

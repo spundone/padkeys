@@ -49,6 +49,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     var listener: Listener? = null
+    /** Extra gestures: delete-key swipe, comma for emoji. See [KeyActions]. */
+    var actions: KeyActions? = null
 
     /**
      * A key. [code] is an Android key code for keys that aren't characters (or one of the page codes); text keys
@@ -87,6 +89,15 @@ class KeyboardView(ctx: Context) : View(ctx) {
     private var layout = KbLayout.PHONE
     /** The phone layout's second page (digits and every ASCII symbol). */
     private var symbols = false
+    /** A number / phone / date pad replaces the layout ([Field.PAD_NONE] for the layout itself). */
+    private var pad = Field.PAD_NONE
+    /** The open long-press popup (accents, punctuation), if any. */
+    private var popup: KeyPopup? = null
+    /** How far below the top of the parent that draws bubbles this view sits (room above it), see [drawBubbles]. */
+    private var overhang = 0f
+    /** The Backspace press being dragged left to select words ([KeyActions.onDeleteSwipe]), and how many. */
+    private var delSwipe: Any? = null
+    private var delWords = 0
 
     private val pointerKeys = HashMap<Int, Key>()       // finger -> key it's holding down (typed on press)
     private val modState = HashMap<Key, ModState>()
@@ -138,6 +149,10 @@ class KeyboardView(ctx: Context) : View(ctx) {
     var flick = true
     /** Drag on the space bar to move the cursor. */
     var spaceCursor = true
+    /** Hold a letter for accents, the period for punctuation, the comma for emoji (instead of the shifted character). */
+    var accents = true
+    /** Drag left from Backspace to select words; lifting deletes them. */
+    var deleteSwipe = true
     /** Height multiplier from settings. */
     var heightScale = 1f
         set(v) { if (field != v) { field = v; requestLayout() } }
@@ -162,6 +177,14 @@ class KeyboardView(ctx: Context) : View(ctx) {
         releaseEverything()
         symbols = s
         build(); layoutKeys(); redraw()
+    }
+
+    /** Show a number / phone / date pad instead of the layout, or the layout again ([Field.PAD_NONE]). */
+    fun showPad(kind: Int) {
+        if (kind == pad && keys.isNotEmpty()) return
+        releaseEverything()
+        pad = kind
+        build(); layoutKeys(); requestLayout(); redraw()
     }
 
     // ------------------------------------------------------------------ layouts
@@ -220,6 +243,11 @@ class KeyboardView(ctx: Context) : View(ctx) {
         fun del(w: Float = 1f) = sm("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, repeat = true)
         fun letters(str: String) = str.map { lt(it) }
 
+        if (pad != Field.PAD_NONE) {
+            keys = NumPad.keys(pad, enter(1f))
+            gridW = 5f; gridH = NumPad.ROWS
+            return
+        }
         val g = Grid()
         when (l) {
             KbLayout.PHONE -> {
@@ -316,7 +344,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         // Rows are a comfortable thumb height; the whole keyboard never takes more than about half the screen,
         // so the app keeps room for the text being typed.
-        val rowDp = if (layout == KbLayout.PHONE) 56f else 48f
+        val rowDp = if (pad != Field.PAD_NONE) 60f else if (layout == KbLayout.PHONE) 56f else 48f
         val want = gridH * rowDp * density * heightScale
         val cap = screenH * min(0.65f, (if (landscape) 0.5f else 0.48f) * heightScale)
         setMeasuredDimension(w, min(want, max(cap, 120 * density)).toInt())
@@ -329,7 +357,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
         // Airy M3E spacing: wider gaps between rows than between keys, a small margin all round.
         val gx = (if (gridW > 12) 4f else 5.5f) * density
         val gy = 7 * density
-        val side = 3 * density
+        // A pad stays thumb-sized on wide screens: centered, at most 640dp across.
+        val side = 3 * density + if (pad != Field.PAD_NONE) max(0f, (width - 640 * density) / 2) else 0f
         unitW = (width - 2 * side - gx) / gridW
         unitH = (height - gy) / gridH
         for (k in keys) {
@@ -390,6 +419,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         when {
             k.code == CODE_SYMBOLS -> { showSymbols(true); return }
             k.code == CODE_LETTERS -> { showSymbols(false); return }
+            k.code == CODE_FULL_KEYBOARD -> { symbols = false; showPad(Field.PAD_NONE); return }
             k.code == KeyEvent.KEYCODE_CAPS_LOCK -> { capsLock = !capsLock; Haptics.click() }
             fn && k.fnCode != 0 -> l?.onKey(k.fnCode, meta)
             fn && k.fnLabel != null && !k.isText -> l?.onText(k.fnLabel, meta) // Fn + Esc = `
@@ -434,6 +464,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     fun releaseEverything() {
         pending.values.forEach { removeCallbacks(it.hold) }; pending.clear()
+        popup = null
+        if (delSwipe != null) { delSwipe = null; actions?.onDeleteSwipeEnd(false) }
         removeCallbacks(repeater); repeatKey = null
         pointerKeys.clear(); heldDone.clear(); modState.clear(); modHeld.clear(); modUsed.clear()
         redraw()
@@ -455,7 +487,12 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     /** Flick and the space-bar cursor: keys that wait for the finger to lift before typing. */
     private fun defers(k: Key) = !k.isModifier &&
-        ((k.code == KeyEvent.KEYCODE_SPACE && spaceCursor) || (flick && k.isText && k.shiftLabel != null))
+        ((k.code == KeyEvent.KEYCODE_SPACE && spaceCursor) || (flick && k.isText && k.shiftLabel != null) ||
+            (accents && pad == Field.PAD_NONE && k.isText && Alternates.of(k.label) != null) || swipesDelete(k))
+
+    /** Backspace waits (tap, hold to repeat, drag left to select words) unless Fn / Ctrl / Alt change what it does. */
+    private fun swipesDelete(k: Key) = deleteSwipe && k.code == KeyEvent.KEYCODE_DEL && actions != null &&
+        !fnActive && activeMods() and (KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON) == 0
 
     @android.annotation.SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
@@ -472,7 +509,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
                     defers(k) -> {
                         val p = Pending(k, e.getX(i), e.getY(i))
                         pending[pid] = p
-                        if (k.code != KeyEvent.KEYCODE_SPACE) postDelayed(p.hold, HOLD_MS)
+                        if (k.code != KeyEvent.KEYCODE_SPACE)
+                            postDelayed(p.hold, if (k.code == KeyEvent.KEYCODE_DEL) REPEAT_DELAY_MS else HOLD_MS)
                     }
                     else -> {
                         pointerKeys[pid] = k
@@ -482,12 +520,14 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 }
             }
             MotionEvent.ACTION_MOVE -> for (i in 0 until e.pointerCount) {
+                popup?.let { pp -> if (pp.pid == e.getPointerId(i) && pp.move(e.getX(i), e.getY(i))) Haptics.soft(0.4f) }
                 val p = pending[e.getPointerId(i)] ?: continue
                 movePending(p, e.getX(i), e.getY(i))
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 val pid = e.getPointerId(e.actionIndex)
                 heldDone.remove(pid)
+                popup?.takeIf { it.pid == pid }?.let { commitPopup(it) }
                 pending.remove(pid)?.let { commit(it) }
                 pointerKeys.remove(pid)?.let { k ->
                     if (k.isModifier) releaseModifier(k)
@@ -501,6 +541,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     private fun movePending(p: Pending, x: Float, y: Float) {
+        if (p.k.code == KeyEvent.KEYCODE_DEL) { moveDelete(p, x); return }
         if (p.k.code == KeyEvent.KEYCODE_SPACE) {
             // Space bar cursor: once the finger has slid, every step moves the cursor one character.
             val step = max(12 * density, unitW * 0.45f)
@@ -511,7 +552,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         } else {
             val up = p.y0 - y
             val was = p.flicked
-            p.flicked = up > max(16 * density, unitH * 0.4f) && up > abs(x - p.x0)
+            p.flicked = flick && up > max(16 * density, unitH * 0.4f) && up > abs(x - p.x0)
             if (p.flicked != was) Haptics.soft(0.6f) // felt as it switches to (or back from) the shifted character
         }
     }
@@ -522,9 +563,60 @@ class KeyboardView(ctx: Context) : View(ctx) {
         Haptics.soft(0.35f) // a light detent per character the cursor moves
     }
 
-    /** Held still: types the shifted character now, like a long press. */
+    /** Delete-key swipe: every step left selects one more word; back to the start selects none. */
+    private fun moveDelete(p: Pending, x: Float) {
+        val step = max(18 * density, unitW * 0.5f)
+        if (delSwipe !== p) {
+            if (p.x0 - x < step * 0.8f) return
+            delSwipe = p; delWords = 0
+            removeCallbacks(p.hold)
+        }
+        val n = ((p.x0 - x) / step + 0.2f).toInt().coerceAtLeast(0)
+        if (n != delWords) { delWords = n; actions?.onDeleteSwipe(n); Haptics.soft(0.5f) }
+    }
+
+    /**
+     * Long press on a key with alternates (accents, punctuation) opens the popup; on the Phone layout's comma, the
+     * emoji panel. False when the key has none (the hold then types the shifted character, as before).
+     */
+    private fun openPopup(pid: Int, p: Pending): Boolean {
+        if (!accents || pad != Field.PAD_NONE || p.flicked || fnActive || activeMods() and (KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON) != 0) return false
+        if (p.k.label == "," && layout == KbLayout.PHONE && !symbols && pad == Field.PAD_NONE && actions != null) {
+            pending.remove(pid); heldDone[pid] = p.k
+            Haptics.click()
+            actions?.onEmojiKey()
+            return true
+        }
+        val items = Alternates.of(p.k.label) ?: return false
+        val upper = p.k.isLetter && ((activeMods() and KeyEvent.META_SHIFT_ON != 0 || autoShift) xor capsLock)
+        pending.remove(pid)
+        popup = KeyPopup(pid, p.k, Alternates.cased(items, upper), width.toFloat(), -overhang, density)
+        Haptics.click()
+        redraw()
+        return true
+    }
+
+    /** The popup's finger lifted: type the selected item. */
+    private fun commitPopup(pp: KeyPopup) {
+        popup = null
+        modHeld.filterValues { it }.keys.forEach { modUsed.add(it) }
+        listener?.onText(pp.text, activeMods())
+        autoShift = false
+        usedOneShots()
+    }
+
+    /** Held still: types the shifted character now, like a long press. Backspace starts repeating instead. */
     private fun holdTimeout(p: Pending) {
         val pid = pending.entries.firstOrNull { it.value === p }?.key ?: return
+        if (p.k.code == KeyEvent.KEYCODE_DEL) {
+            pending.remove(pid)
+            pointerKeys[pid] = p.k
+            emit(p.k, false)
+            removeCallbacks(repeater); repeatKey = p.k; postDelayed(repeater, REPEAT_MS)
+            return
+        }
+        if (openPopup(pid, p)) return
+        if (!flick) return // waiting only for the popup: type the plain character when lifted
         pending.remove(pid)
         heldDone[pid] = p.k
         Haptics.click()
@@ -533,6 +625,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     private fun commit(p: Pending) {
         removeCallbacks(p.hold)
+        if (delSwipe === p) { delSwipe = null; actions?.onDeleteSwipeEnd(delWords > 0); usedOneShots(); return }
         if (p.cursor) { usedOneShots(); return }
         emit(p.k, p.flicked)
     }
@@ -541,7 +634,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val it = pending.entries.iterator()
         while (it.hasNext()) {
             val p = it.next().value
-            if (p.cursor) continue
+            if (p.cursor || delSwipe === p) continue
             it.remove(); commit(p)
         }
     }
@@ -563,6 +656,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
         const val REPEAT_MS = 50L
         const val CODE_SYMBOLS = -1
         const val CODE_LETTERS = -2
+        /** The number pad's ABC key: the full keyboard. */
+        const val CODE_FULL_KEYBOARD = -3
         private const val SPLIT_GAP = 2f
         /** Placeholder label for Enter; replaced by [enterLabel] when drawn. */
         private const val ENTER = "\u0000enter"
@@ -674,7 +769,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     private fun isPressed(k: Key) = pointerKeys.containsValue(k) || modHeld[k] == true ||
-        pending.values.any { it.k === k } || heldDone.containsValue(k)
+        pending.values.any { it.k === k } || heldDone.containsValue(k) || popup?.key === k
 
     /** Press morph per key: 1 while held, easing back to 0 after release. */
     private val press = HashMap<Key, Float>()
@@ -773,6 +868,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
      * ([dx], [dy]) (this view's position in the parent), so a bubble over the top row may cover the suggestion strip.
      */
     fun drawBubbles(c: Canvas, dx: Float, dy: Float) {
+        overhang = dy
+        popup?.let { it.draw(c, dx, dy, bubblePaint, bubbleText); return }
         if (!keyPreview) return
         val bubbles = pointerKeys.values.filter { !it.isModifier }.map { it to false } +
             pending.values.filter { !it.cursor }.map { it.k to it.flicked } + heldDone.values.map { it to true }

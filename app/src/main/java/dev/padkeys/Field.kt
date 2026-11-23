@@ -12,6 +12,10 @@ import android.view.inputmethod.EditorInfo
 data class Field(
     /** Show word suggestions. */
     val suggest: Boolean,
+    /** Misspelled words may be corrected (text you write in prose: not names, addresses, filters). */
+    val autocorrect: Boolean,
+    /** Number pad kind: [PAD_NONE], [PAD_NUMBER], [PAD_PHONE] or [PAD_DATE]. */
+    val pad: Int,
     /** Typed words may be learned (if the user turned learning on). */
     val learn: Boolean,
     /** The field wants sentences capitalized ([EditorInfo.inputType] has a CAP flag). */
@@ -25,7 +29,12 @@ data class Field(
     val enterLabel: String,
 ) {
     companion object {
-        val NONE = Field(suggest = false, learn = false, autoCap = false, numeric = false, raw = true, multiLine = false, enterLabel = "↵")
+        const val PAD_NONE = 0
+        const val PAD_NUMBER = 1
+        const val PAD_PHONE = 2
+        const val PAD_DATE = 3
+
+        val NONE = Field(suggest = false, autocorrect = false, pad = PAD_NONE, learn = false, autoCap = false, numeric = false, raw = true, multiLine = false, enterLabel = "↵")
 
         fun of(info: EditorInfo?): Field {
             if (info == null) return NONE
@@ -46,8 +55,20 @@ data class Field(
             val caps = text && !password &&
                 flags and (InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or InputType.TYPE_TEXT_FLAG_CAP_WORDS or
                     InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS) != 0
+            // Names, addresses and list filters are full of words no dictionary knows: don't "fix" them.
+            val prose = suggest && variation !in setOf(
+                InputType.TYPE_TEXT_VARIATION_PERSON_NAME, InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS,
+                InputType.TYPE_TEXT_VARIATION_FILTER, InputType.TYPE_TEXT_VARIATION_PHONETIC,
+            )
             return Field(
                 suggest = suggest,
+                autocorrect = prose,
+                pad = when {
+                    cls == InputType.TYPE_CLASS_NUMBER -> PAD_NUMBER // PINs too
+                    cls == InputType.TYPE_CLASS_PHONE -> PAD_PHONE
+                    cls == InputType.TYPE_CLASS_DATETIME -> PAD_DATE
+                    else -> PAD_NONE
+                },
                 learn = suggest && !noLearning,
                 autoCap = caps,
                 numeric = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE ||
