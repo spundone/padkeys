@@ -88,6 +88,8 @@ class SwipeDecoder(private val words: Array<String>) {
 
         fun consider(word: String, seq: ByteArray, rank: Int) {
             if (seq.size < 2 || seq.size > MAX_SEQ) return
+            // The list's tail has junk short "words" (hg, bok, boi): short words must be common to be swiped.
+            if ((word.length <= 2 && rank > 1200) || (word.length == 3 && rank > 7000)) return
             var t = 0f
             for (j in seq.indices) {
                 val l = seq[j].toInt()
