@@ -6,6 +6,22 @@ All notable changes to PadKeys are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Hold a letter for its accented forms and slide to one; hold the period for punctuation; hold the comma (Phone
+  layout) for emoji.
+- Autocorrect when a space or punctuation ends a misspelled word, undone by Backspace right after; off in
+  password, email, web address, name and no-suggestion fields. Setting to turn it off.
+- Double-space types ". " (setting).
+- Toolbar in the suggestion strip: emoji panel with categories and recently used emoji; clipboard history with
+  pinning and a paste chip for fresh copies; text editing panel; one-handed mode; voice typing hand-over.
+- Number pad and phone pad in number, phone and date fields (setting).
+- One-handed mode (left or right) with switch-side and full-width buttons.
+- Swipe left from Backspace to select words and delete them (setting).
+- Phone and URL fields in the settings screen's test field.
+
+### Changed
+- Holding a letter that has accents opens the accent popup instead of typing the capital (flick up still does).
+
 ## [1.0.0] – 2026-11-20
 
 ### Added
