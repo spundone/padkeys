@@ -39,7 +39,9 @@ import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Gavel
+import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Keyboard
@@ -430,6 +432,18 @@ private fun KeyboardSettings() {
         var dbl by remember { mutableStateOf(Prefs.doubleSpace) }
         SwitchItem(6, 7, Icons.Rounded.MoreHoriz, "Double-space period",
             "Two quick spaces after a word type a period and a space", dbl) { dbl = it; Prefs.doubleSpace = it }
+    }
+
+    Section("Glide typing") {
+        var glide by remember { mutableStateOf(Prefs.glide) }
+        SwitchItem(0, 2, Icons.Rounded.Gesture, "Glide typing",
+            "Slide through the letters of a word without lifting. Never in password fields", glide) {
+            glide = it; Prefs.glide = it
+        }
+        var trail by remember { mutableStateOf(Prefs.glideTrail) }
+        SwitchItem(1, 2, Icons.Rounded.Draw, "Show gesture trail", "A fading line follows your finger as you glide", trail) {
+            trail = it; Prefs.glideTrail = it
+        }
     }
 
     Section("Suggestions") {

@@ -1,0 +1,2 @@
+Glide typing: slide across the letters to type a word, with a trail and alternatives.
+Gboard-style extras: hold for accents, autocorrect with undo, double-space period, emoji panel, clipboard history, number pad, one-handed mode, swipe Backspace to delete words, voice typing key and a text editing panel.

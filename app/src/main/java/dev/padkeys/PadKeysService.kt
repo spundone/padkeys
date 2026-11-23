@@ -61,6 +61,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
      */
     private var autoSpace = false
     private var autoSpaceAt = -1
+    /** Glide typing: the glided word's spacing, alternatives and Backspace (GlideInput.kt). */
+    private val glide = GlideInput({ currentInputConnection }, { strip?.show(if (suggestionsOn) it else emptyList()) }, { learning })
 
     override fun onCreate() {
         super.onCreate()
@@ -80,7 +82,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     private val landscape get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     override fun onCreateInputView(): View {
-        val kb = KeyboardView(this).also { it.listener = this; it.actions = this }
+        val kb = KeyboardView(this).also { it.listener = this; it.actions = this; it.glide.listener = glide }
         val st = SuggestionStrip(this).also { it.listener = this; it.tools = this }
         val em = EmojiPanel(this).also { it.listener = this }
         val cp = ClipboardPanel(this).also { it.listener = this }
@@ -112,6 +114,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         AutoCorrect.undo = null
         lastSpaceAt = 0
         if (!restarting) closePanel()
+        glide.clear()
         applySettings()
         keyboard?.let { kb ->
             if (!restarting) kb.releaseEverything()
@@ -119,7 +122,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
             kb.showPad(if (Prefs.numberPad) field.pad else Field.PAD_NONE)
             kb.enterLabel = field.enterLabel
         }
-        Predict.listener = Predict.Listener { _, list -> strip?.show(if (suggestionsOn) list else emptyList()) }
+        Predict.listener = Predict.Listener { _, list -> if (!glide.showing) strip?.show(if (suggestionsOn) list else emptyList()) }
         Predict.reset()
         Clips.onChange = { clipPanel?.reload(); showClipOffer() }
         Clips.start(this)
@@ -255,6 +258,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         if (autoSpace) {
             if (autoSpaceAt == -1) autoSpaceAt = newSelEnd else if (newSelEnd != autoSpaceAt) autoSpace = false
         }
+        glide.onSelection(newSelStart, newSelEnd)
         refresh()
     }
 
@@ -278,6 +282,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         kb.deleteSwipe = Prefs.deleteSwipe
         strip?.toolset = toolset()
         root?.oneHanded(Prefs.oneHanded, Prefs.oneHandLeft)
+        kb.glide.enabled = Prefs.glide && GlideInput.allowed(info)
+        kb.glide.showTrail = Prefs.glideTrail
         root?.invalidateAll()
     }
 
@@ -291,6 +297,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         val ei = info
         kb.autoShift = Prefs.autoCaps && field.autoCap && !hasSelection && ei != null &&
             ic.getCursorCapsMode(ei.inputType) != 0
+        if (glide.showing) return
         if (!suggestionsOn || hasSelection) { Predict.reset(); strip?.show(emptyList()); return }
         Predict.lookup(Words.ending(ic.getTextBeforeCursor(48, 0)))
     }
@@ -317,6 +324,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         if (learning && text.isNotEmpty() && !text[0].isLetterOrDigit() && text[0] != '\'') {
             Predict.learn(Words.ending(ic.getTextBeforeCursor(48, 0)))
         }
+        // Tapping letters right after a glided word starts a new word: space first, like Gboard.
+        if (text.isNotEmpty() && text[0].isLetterOrDigit() && glide.startsNewWord()) ic.commitText(" ", 1)
         if (field.raw) typeAsKeys(ic, text) else ic.commitText(text, 1)
     }
 
@@ -413,6 +422,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
             }
         }
         if (hasSelection || !ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
+        if (meta and KeyEvent.META_CTRL_ON == 0 && glide.backspace()) return
         val before = ic.getTextBeforeCursor(64, 0)
         // Nothing before the cursor: let the app see the key (chips, "delete the empty item", etc.).
         if (before.isNullOrEmpty()) { sendKey(ic, KeyEvent.KEYCODE_DEL, meta); return }
@@ -481,6 +491,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     /** Replaces the word at the cursor (the part before it and any rest of it after it) with [word] and a space. */
     override fun onPick(word: String) {
         val ic = currentInputConnection ?: return
+        if (glide.pick(word)) return
         val before = Words.ending(ic.getTextBeforeCursor(48, 0))
         val afterText = ic.getTextAfterCursor(48, 0)
         val after = Words.starting(afterText)

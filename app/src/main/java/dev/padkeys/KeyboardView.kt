@@ -123,6 +123,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
         var flicked = false
         var cursor = false
         var lastX = x0
+        /** A letter touch that became a glide-typing gesture ([glide]). */
+        var glide = false
         val hold = Runnable { holdTimeout(this) }
     }
     private val pending = HashMap<Int, Pending>()
@@ -159,6 +161,9 @@ class KeyboardView(ctx: Context) : View(ctx) {
     /** Enter's label: the field's action ("Go", "Send"…) or ↵. */
     var enterLabel = "↵"
         set(v) { if (field != v) { field = v; redraw() } }
+
+    /** Glide typing on the letter keys: gesture tracking, decoding, trail (see Glide.kt). */
+    val glide = Glide(this) { keys }
 
     init { isHapticFeedbackEnabled = false }
 
@@ -463,6 +468,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     fun releaseEverything() {
+        glide.cancel()
         pending.values.forEach { removeCallbacks(it.hold) }; pending.clear()
         popup = null
         if (delSwipe != null) { delSwipe = null; actions?.onDeleteSwipeEnd(false) }
@@ -488,7 +494,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
     /** Flick and the space-bar cursor: keys that wait for the finger to lift before typing. */
     private fun defers(k: Key) = !k.isModifier &&
         ((k.code == KeyEvent.KEYCODE_SPACE && spaceCursor) || (flick && k.isText && k.shiftLabel != null) ||
-            (accents && pad == Field.PAD_NONE && k.isText && Alternates.of(k.label) != null) || swipesDelete(k))
+            (accents && pad == Field.PAD_NONE && k.isText && Alternates.of(k.label) != null) || swipesDelete(k) ||
+            (glide.enabled && k.isLetter))
 
     /** Backspace waits (tap, hold to repeat, drag left to select words) unless Fn / Ctrl / Alt change what it does. */
     private fun swipesDelete(k: Key) = deleteSwipe && k.code == KeyEvent.KEYCODE_DEL && actions != null &&
@@ -500,6 +507,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val i = e.actionIndex
                 val pid = e.getPointerId(i)
+                // Other fingers are ignored while one glides.
+                if (glide.active) return true
                 val k = keyAt(e.getX(i), e.getY(i)) ?: return true
                 // A new key types whatever is still waiting first, so fast rollover keeps its order.
                 if (!k.isModifier) flushPending()
@@ -511,6 +520,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                         pending[pid] = p
                         if (k.code != KeyEvent.KEYCODE_SPACE)
                             postDelayed(p.hold, if (k.code == KeyEvent.KEYCODE_DEL) REPEAT_DELAY_MS else HOLD_MS)
+                        if (k.isLetter && pending.size == 1 && glideAllowed()) glide.start(p.x0, p.y0, k, glideCase()) else glide.cancel()
                     }
                     else -> {
                         pointerKeys[pid] = k
@@ -528,7 +538,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 val pid = e.getPointerId(e.actionIndex)
                 heldDone.remove(pid)
                 popup?.takeIf { it.pid == pid }?.let { commitPopup(it) }
-                pending.remove(pid)?.let { commit(it) }
+                pending.remove(pid)?.let { if (it.glide) finishGlide() else { if (glide.tracking) glide.cancel(); commit(it) } }
                 pointerKeys.remove(pid)?.let { k ->
                     if (k.isModifier) releaseModifier(k)
                     else { if (repeatKey === k) { removeCallbacks(repeater); repeatKey = null }; usedOneShots() }
@@ -550,6 +560,11 @@ class KeyboardView(ctx: Context) : View(ctx) {
             while (x - p.lastX >= step) { p.lastX += step; cursor(KeyEvent.KEYCODE_DPAD_RIGHT) }
             while (p.lastX - x >= step) { p.lastX -= step; cursor(KeyEvent.KEYCODE_DPAD_LEFT) }
         } else {
+            if (p.glide) { glide.move(x, y); return }
+            if (glide.tracking && pending.size == 1 && glide.move(x, y)) {
+                p.glide = true; p.flicked = false; removeCallbacks(p.hold)
+                return
+            }
             val up = p.y0 - y
             val was = p.flicked
             p.flicked = flick && up > max(16 * density, unitH * 0.4f) && up > abs(x - p.x0)
@@ -607,6 +622,9 @@ class KeyboardView(ctx: Context) : View(ctx) {
 
     /** Held still: types the shifted character now, like a long press. Backspace starts repeating instead. */
     private fun holdTimeout(p: Pending) {
+        // A letter already sliding toward a glide isn't being held still.
+        if (glide.tracking && glide.moved()) return
+        if (glide.tracking) glide.cancel()
         val pid = pending.entries.firstOrNull { it.value === p }?.key ?: return
         if (p.k.code == KeyEvent.KEYCODE_DEL) {
             pending.remove(pid)
@@ -623,6 +641,25 @@ class KeyboardView(ctx: Context) : View(ctx) {
         emit(p.k, true)
     }
 
+    /** Glide only on the letters with nothing else going on but Shift (Ctrl / Alt / Fn + letter are shortcuts). */
+    private fun glideAllowed() = glide.enabled && !symbols && !fnActive &&
+        activeMods() and (KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON or KeyEvent.META_META_ON) == 0 &&
+        pointerKeys.values.all { it.isModifier }
+
+    private fun glideCase() = when {
+        capsLock || shiftLocked() -> GlideCase.UPPER
+        activeMods() and KeyEvent.META_SHIFT_ON != 0 || autoShift -> GlideCase.CAPITALIZED
+        else -> GlideCase.LOWER
+    }
+
+    /** A gesture ended: the word goes out with Shift applied, which (one-shot or auto) is then used up. */
+    private fun finishGlide() {
+        modHeld.filterValues { it }.keys.forEach { modUsed.add(it) }
+        glide.finish()
+        autoShift = false
+        usedOneShots()
+    }
+
     private fun commit(p: Pending) {
         removeCallbacks(p.hold)
         if (delSwipe === p) { delSwipe = null; actions?.onDeleteSwipeEnd(delWords > 0); usedOneShots(); return }
@@ -634,7 +671,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val it = pending.entries.iterator()
         while (it.hasNext()) {
             val p = it.next().value
-            if (p.cursor || delSwipe === p) continue
+            if (p.cursor || p.glide || delSwipe === p) continue
             it.remove(); commit(p)
         }
     }
@@ -769,7 +806,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     private fun isPressed(k: Key) = pointerKeys.containsValue(k) || modHeld[k] == true ||
-        pending.values.any { it.k === k } || heldDone.containsValue(k) || popup?.key === k
+        pending.values.any { it.k === k && !it.glide } || heldDone.containsValue(k) || popup?.key === k
 
     /** Press morph per key: 1 while held, easing back to 0 after release. */
     private val press = HashMap<Key, Float>()
@@ -859,6 +896,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
             }
         }
         if (animating) postInvalidateOnAnimation() else lastFrame = 0L
+        glide.draw(c)
     }
 
     private val tmpRect = RectF()
@@ -869,10 +907,11 @@ class KeyboardView(ctx: Context) : View(ctx) {
      */
     fun drawBubbles(c: Canvas, dx: Float, dy: Float) {
         overhang = dy
+        glide.drawPreview(c, dx, dy)
         popup?.let { it.draw(c, dx, dy, bubblePaint, bubbleText); return }
         if (!keyPreview) return
         val bubbles = pointerKeys.values.filter { !it.isModifier }.map { it to false } +
-            pending.values.filter { !it.cursor }.map { it.k to it.flicked } + heldDone.values.map { it to true }
+            pending.values.filter { !it.cursor && !it.glide }.map { it.k to it.flicked } + heldDone.values.map { it to true }
         for ((k, flicked) in bubbles) {
             if (k.small || !k.isText) continue
             val label = labelFor(k, flicked)

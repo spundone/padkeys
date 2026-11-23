@@ -8,6 +8,12 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
 - **Layouts:** Phone (ten big columns, number row, `?123` symbols page, slim Esc / Tab / Ctrl / Alt / arrows row),
   Laptop, 65%, Full and Split. One layout upright and one sideways; the keyboard button left of the suggestions
   cycles layouts, holding it opens Android's keyboard picker.
+- **Flick:** flick a key up (or hold it) for its shifted character, shown small in the corner.
+- **Glide typing:** slide through a word's letters without lifting, Gboard-style, on every layout's letters. The
+  word goes in with a space before it (none after, so punctuation sticks to it); Shift / Caps Lock give "Hello" /
+  "HELLO"; the strip offers the next guesses (tap one to swap it in) and Backspace right after deletes the whole word.
+  A fading trail in the theme color and a preview of the best guess follow the finger. Decoded on the phone from
+  the bundled word list (and learned words). Off in password fields; trail and glide can be turned off.
 - **Flick:** flick a key up for its shifted character, shown small in the corner (holding works too on keys
   without accents).
 - **Hold for accents:** hold a letter for its accented forms (e → è é ê ë ē ę ė, a → à á â ä æ ã å ā, …) and slide
@@ -60,6 +66,7 @@ Android Studio or the command line (JDK 17+, Android SDK with platform 37):
 ```sh
 ./gradlew assembleDebug      # app/build/outputs/apk/debug/app-debug.apk (package dev.padkeys.debug)
 ./gradlew lintDebug
+./gradlew testDebugUnitTest  # glide decoder tests (JVM)
 ```
 
 Then turn it on in Settings › System › Keyboard › On-screen keyboards, or run the app and follow its setup steps.
@@ -80,6 +87,7 @@ From adb: `adb shell ime enable dev.padkeys.debug/dev.padkeys.PadKeysService` an
 | `OneHand.kt` | One-handed mode's side buttons, voice typing hand-over |
 | `SuggestionStrip.kt` | Suggestions, toolbar, paste chip, layout and settings buttons |
 | `Predict.kt` | Word list completions, spell checker corrections, opt-in learned words |
+| `Glide.kt`, `SwipeDecoder.kt`, `GlideInput.kt` | Glide typing: gesture tracking, trail and preview; SHARK2-style template-matching decoder over the word list; committing, spacing, alternatives and Backspace |
 | `Field.kt` | What the focused field allows (suggestions, learning, Enter label, symbols first) and word finding |
 | `Prefs.kt`, `Ui.kt`, `Real.kt` | Settings, colors and haptics, the Realistic look |
 | `MainActivity.kt`, `ui/` | Setup, test field, settings and licenses (Compose, Material 3 Expressive) |
