@@ -31,7 +31,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Gavel
+import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.Height
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Keyboard
@@ -389,6 +391,18 @@ private fun KeyboardSettings() {
         var caps by remember { mutableStateOf(Prefs.autoCaps) }
         SwitchItem(3, 4, Icons.Rounded.TextFields, "Capitalize sentences",
             "Shift is on at the start of a sentence, where the app asks for it", caps) { caps = it; Prefs.autoCaps = it }
+    }
+
+    Section("Glide typing") {
+        var glide by remember { mutableStateOf(Prefs.glide) }
+        SwitchItem(0, 2, Icons.Rounded.Gesture, "Glide typing",
+            "Slide through the letters of a word without lifting. Never in password fields", glide) {
+            glide = it; Prefs.glide = it
+        }
+        var trail by remember { mutableStateOf(Prefs.glideTrail) }
+        SwitchItem(1, 2, Icons.Rounded.Draw, "Show gesture trail", "A fading line follows your finger as you glide", trail) {
+            trail = it; Prefs.glideTrail = it
+        }
     }
 
     Section("Suggestions") {

@@ -52,6 +52,7 @@ android {
         }
     }
     buildFeatures { compose = true; buildConfig = true }
+    testOptions { unitTests.all { it.testLogging { events("passed", "failed"); showStandardStreams = true } } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -77,4 +78,5 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.13.0")
+    testImplementation("junit:junit:4.13.2")
 }

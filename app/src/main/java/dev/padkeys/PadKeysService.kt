@@ -50,6 +50,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
      */
     private var autoSpace = false
     private var autoSpaceAt = -1
+    /** Glide typing: the glided word's spacing, alternatives and Backspace (GlideInput.kt). */
+    private val glide = GlideInput({ currentInputConnection }, { strip?.show(if (suggestionsOn) it else emptyList()) }, { learning })
 
     override fun onCreate() {
         super.onCreate()
@@ -69,7 +71,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     private val landscape get() = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     override fun onCreateInputView(): View {
-        val kb = KeyboardView(this).also { it.listener = this }
+        val kb = KeyboardView(this).also { it.listener = this; it.glide.listener = glide }
         val st = SuggestionStrip(this).also { it.listener = this }
         val r = KeyboardRoot(this, st, kb)
         root = r; keyboard = kb; strip = st
@@ -91,13 +93,14 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         field = Field.of(editorInfo)
         hasSelection = editorInfo.initialSelStart != editorInfo.initialSelEnd
         autoSpace = false
+        glide.clear()
         applySettings()
         keyboard?.let { kb ->
             if (!restarting) kb.releaseEverything()
             kb.showSymbols(field.numeric)
             kb.enterLabel = field.enterLabel
         }
-        Predict.listener = Predict.Listener { _, list -> strip?.show(if (suggestionsOn) list else emptyList()) }
+        Predict.listener = Predict.Listener { _, list -> if (!glide.showing) strip?.show(if (suggestionsOn) list else emptyList()) }
         Predict.reset()
         refresh()
     }
@@ -116,6 +119,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         if (autoSpace) {
             if (autoSpaceAt == -1) autoSpaceAt = newSelEnd else if (newSelEnd != autoSpaceAt) autoSpace = false
         }
+        glide.onSelection(newSelStart, newSelEnd)
         refresh()
     }
 
@@ -134,6 +138,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         kb.spaceCursor = Prefs.spaceCursor
         kb.keyPreview = Prefs.keyPreview
         kb.heightScale = Prefs.height
+        kb.glide.enabled = Prefs.glide && GlideInput.allowed(info)
+        kb.glide.showTrail = Prefs.glideTrail
         root?.invalidateAll()
     }
 
@@ -147,6 +153,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         val ei = info
         kb.autoShift = Prefs.autoCaps && field.autoCap && !hasSelection && ei != null &&
             ic.getCursorCapsMode(ei.inputType) != 0
+        if (glide.showing) return
         if (!suggestionsOn || hasSelection) { Predict.reset(); strip?.show(emptyList()); return }
         Predict.lookup(Words.ending(ic.getTextBeforeCursor(48, 0)))
     }
@@ -210,6 +217,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     private fun backspace(ic: InputConnection, meta: Int) {
         if (field.raw) { sendKey(ic, KeyEvent.KEYCODE_DEL, meta); return }
         if (hasSelection || !ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
+        if (meta and KeyEvent.META_CTRL_ON == 0 && glide.backspace()) return
         val before = ic.getTextBeforeCursor(64, 0)
         // Nothing before the cursor: let the app see the key (chips, "delete the empty item", etc.).
         if (before.isNullOrEmpty()) { sendKey(ic, KeyEvent.KEYCODE_DEL, meta); return }
@@ -278,6 +286,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     /** Replaces the word at the cursor (the part before it and any rest of it after it) with [word] and a space. */
     override fun onPick(word: String) {
         val ic = currentInputConnection ?: return
+        if (glide.pick(word)) return
         val before = Words.ending(ic.getTextBeforeCursor(48, 0))
         val afterText = ic.getTextAfterCursor(48, 0)
         val after = Words.starting(afterText)

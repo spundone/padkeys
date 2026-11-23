@@ -6,6 +6,14 @@ All notable changes to PadKeys are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Glide typing: slide across the letters to type a word, on all layouts. Words are decoded on the phone by matching
+  the path against the bundled word list (and learned words, if learning is on). The word gets a space before it,
+  punctuation typed after it attaches to it, Shift / Caps Lock capitalize it, the next guesses appear in the
+  suggestion strip to swap in, and Backspace right after deletes the whole word. A fading trail in the theme color
+  and a floating preview of the best guess follow the finger. Settings: "Glide typing" and "Show gesture trail"
+  (both on); never in password fields.
+
 ## [1.0.0] – 2026-11-20
 
 ### Added

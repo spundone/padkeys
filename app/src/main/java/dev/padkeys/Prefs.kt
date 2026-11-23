@@ -55,6 +55,16 @@ object Prefs {
         get() = bool("autoCaps", true)
         set(v) = putBool("autoCaps", v)
 
+    /** Glide typing: slide across the letters to type a word. */
+    var glide: Boolean
+        get() = bool("glide", true)
+        set(v) = putBool("glide", v)
+
+    /** Draw the glide-typing trail under the finger. */
+    var glideTrail: Boolean
+        get() = bool("glideTrail", true)
+        set(v) = putBool("glideTrail", v)
+
     // ---------------------------------------------------------------- suggestions
 
     /** Word suggestions above the keys. */

@@ -71,6 +71,9 @@ object Predict {
         return best.sorted().map { w[it] }
     }
 
+    /** The bundled list, most common first (empty while it loads). For the glide decoder. */
+    fun wordList(): Array<String> = words
+
     /** [word] is in the bundled list (so it's spelled right and needs no correction). */
     private fun known(word: String): Boolean {
         val w = words; val s = sorted
@@ -173,6 +176,9 @@ object Predict {
 
     private fun learnedWords(): List<String> =
         if (!Prefs.learn) emptyList() else counts().entries.sortedByDescending { it.value }.map { it.key }
+
+    /** Learned words and how often each was typed, when learning is on (glide typing favors them). */
+    fun learnedCounts(): Map<String, Int> = if (!Prefs.learn) emptyMap() else counts()
 
     /** How many words have been learned. */
     val learnedCount get() = counts().size
