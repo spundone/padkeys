@@ -6,6 +6,19 @@ All notable changes to PadKeys are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.4.0] – 2026-11-26
+
+### Added
+- A Googlebook layout: a top row of Esc, Back, Home, hide keyboard, media, mute, volume, voice typing, emoji and
+  clipboard keys (F1–F12 with Fn), the launcher (Action) key where Caps Lock is, an assistant key between Fn and
+  Alt, and Action + Space / H / ← for the assistant, home and back.
+- Floating keyboard: a smaller keyboard window that can be dragged anywhere and resized, over the app instead of
+  pushing it up (taps around it reach the app). From the toolbar or settings; docks again from its bar. Remembers
+  its place and width for upright and sideways.
+
+### Changed
+- The layout picker in settings shows two rows of three.
+
 ## [1.3.0] – 2026-11-26
 
 ### Added

@@ -6,8 +6,15 @@ PadKeys is an Android system keyboard (input method) spun off from [PadBridge](h
 on-screen keyboard. It keeps that keyboard's feel and types into this phone's apps instead of a Bluetooth computer.
 
 - **Layouts:** Phone (ten big columns, number row, `?123` symbols page, slim Esc / Tab / Ctrl / Alt / arrows row),
-  Laptop, 65%, Full and Split. One layout upright and one sideways; the keyboard button left of the suggestions
+  Laptop, 65%, Full, Split and Googlebook. One layout upright and one sideways; the keyboard button left of the suggestions
   cycles layouts, holding it opens Android's keyboard picker.
+- **Googlebook layout:** laid out like a Googlebook keyboard. The top row is Esc, Android's Back and Home, hide
+  keyboard, previous / play-pause / next, mute, volume down / up, voice typing, emoji and clipboard (hold Fn for
+  F1–F12). The launcher (Action) key sits where Caps Lock would be and the assistant key between Fn and Alt.
+  Action + Space opens the assistant, Action + H goes home, Action + ← goes back; Delete is Fn + Backspace.
+- **Floating keyboard:** a smaller keyboard window you can drag anywhere, so the app keeps the whole screen and
+  stays tappable around it. Drag the bar on top to move it, the arrows at its right end to resize, the button at its
+  left to dock it again. Turn it on from the toolbar or settings; it remembers its place for upright and sideways.
 - **Flick:** flick a key up (or hold it) for its shifted character, shown small in the corner.
 - **Glide typing:** slide through a word's letters without lifting, Gboard-style, on every layout's letters. The
   word goes in with a space before it (none after, so punctuation sticks to it); Shift / Caps Lock give "Hello" /

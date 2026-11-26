@@ -38,6 +38,25 @@ object Prefs {
         get() = bool("oneHanded", false)
         set(v) = putBool("oneHanded", v)
 
+    /** Floating mode: the keyboard is a smaller window that can be dragged anywhere on the screen. */
+    var floating: Boolean
+        get() = bool("floating", false)
+        set(v) = putBool("floating", v)
+
+    /**
+     * Where the floating keyboard sits, per orientation: across and down the room around it (0–1, bottom center by
+     * default), and its width in px (0 for the default).
+     */
+    fun floatPlace(landscape: Boolean): Triple<Float, Float, Int> {
+        val o = if (landscape) "L" else "P"
+        return Triple(p.getFloat("floatX$o", 0.5f), p.getFloat("floatY$o", 1f), p.getInt("floatW$o", 0))
+    }
+
+    fun setFloatPlace(landscape: Boolean, x: Float, y: Float, w: Int) {
+        val o = if (landscape) "L" else "P"
+        p.edit().putFloat("floatX$o", x).putFloat("floatY$o", y).putInt("floatW$o", w).apply()
+    }
+
     /** Which side the one-handed keyboard sits on. */
     var oneHandLeft: Boolean
         get() = bool("oneHandLeft", false)

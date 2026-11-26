@@ -11,6 +11,7 @@ enum class Tool(val icon: Icons.Id, val label: String) {
     CLIPBOARD(Icons.Id.CLIPBOARD, "Clipboard"),
     EDIT(Icons.Id.EDIT, "Text editing"),
     ONE_HAND(Icons.Id.ONE_HAND, "One-handed mode"),
+    FLOAT(Icons.Id.FLOAT, "Floating keyboard"),
     VOICE(Icons.Id.MIC, "Voice typing"),
 }
 
@@ -29,6 +30,8 @@ object Icons {
     enum class Id {
         EMOJI, CLIPBOARD, EDIT, ONE_HAND, MIC, BACKSPACE, PIN, PINNED, CLOSE, LEFT, RIGHT, UP, DOWN, EXPAND, SWAP,
         CLOCK, KEYBOARD, SELECT_ALL, COPY, CUT, PASTE, HOME, END, FORWARD_DELETE, RETURN,
+        NAV_BACK, NAV_HOME, HIDE_KEYBOARD, PREVIOUS, PLAY_PAUSE, NEXT, MUTE, VOLUME_DOWN, VOLUME_UP, ASSIST, LAUNCHER,
+        FLOAT, DOCK, RESIZE,
     }
 
     private val path = Path()
@@ -101,6 +104,55 @@ object Icons {
                 p.lineTo(17f, 14f); p.lineTo(14f, 10f); p.lineTo(14f, 4f)
                 p.moveTo(12f, 14f); p.lineTo(12f, 20.5f)
                 fill = id == Id.PINNED
+            }
+            Id.NAV_BACK -> { p.moveTo(17f, 5f); p.lineTo(17f, 19f); p.lineTo(6f, 12f); p.close() }
+            Id.NAV_HOME -> p.addCircle(12f, 12f, 7f, Path.Direction.CW)
+            Id.HIDE_KEYBOARD -> {
+                oval.set(3f, 3.5f, 21f, 14.5f); p.addRoundRect(oval, 2f, 2f, Path.Direction.CW)
+                for (x in listOf(7f, 10f, 13f, 16f)) p.addCircle(x, 7f, 0.4f, Path.Direction.CW)
+                p.moveTo(8.5f, 11f); p.lineTo(15.5f, 11f)
+                p.moveTo(9f, 17.5f); p.lineTo(12f, 20.5f); p.lineTo(15f, 17.5f)
+            }
+            Id.PREVIOUS -> { p.moveTo(6f, 6f); p.lineTo(6f, 18f); p.moveTo(18f, 6.5f); p.lineTo(18f, 17.5f); p.lineTo(9.5f, 12f); p.close() }
+            Id.NEXT -> { p.moveTo(18f, 6f); p.lineTo(18f, 18f); p.moveTo(6f, 6.5f); p.lineTo(6f, 17.5f); p.lineTo(14.5f, 12f); p.close() }
+            Id.PLAY_PAUSE -> {
+                p.moveTo(4f, 6.5f); p.lineTo(4f, 17.5f); p.lineTo(12f, 12f); p.close()
+                p.moveTo(15f, 6.5f); p.lineTo(15f, 17.5f); p.moveTo(19.5f, 6.5f); p.lineTo(19.5f, 17.5f)
+            }
+            Id.MUTE, Id.VOLUME_DOWN, Id.VOLUME_UP -> {
+                p.moveTo(3.5f, 9.5f); p.lineTo(7f, 9.5f); p.lineTo(11.5f, 5.5f); p.lineTo(11.5f, 18.5f); p.lineTo(7f, 14.5f)
+                p.lineTo(3.5f, 14.5f); p.close()
+                when (id) {
+                    Id.MUTE -> { p.moveTo(15f, 9.5f); p.lineTo(20f, 14.5f); p.moveTo(20f, 9.5f); p.lineTo(15f, 14.5f) }
+                    Id.VOLUME_DOWN -> { oval.set(10f, 8f, 17f, 16f); p.addArc(oval, -50f, 100f) }
+                    else -> {
+                        oval.set(10f, 8f, 17f, 16f); p.addArc(oval, -50f, 100f)
+                        oval.set(9.5f, 4.5f, 21f, 19.5f); p.addArc(oval, -50f, 100f)
+                    }
+                }
+            }
+            Id.ASSIST -> {
+                // A four-pointed sparkle.
+                p.moveTo(12f, 3f); p.quadTo(13f, 11f, 21f, 12f); p.quadTo(13f, 13f, 12f, 21f)
+                p.quadTo(11f, 13f, 3f, 12f); p.quadTo(11f, 11f, 12f, 3f); p.close()
+                fill = true
+            }
+            Id.LAUNCHER -> { p.addCircle(12f, 12f, 8f, Path.Direction.CW); p.addCircle(12f, 12f, 3.5f, Path.Direction.CW) }
+            Id.FLOAT -> {
+                // A small keyboard lifted off the bottom, with its drag bar.
+                oval.set(4f, 8f, 20f, 18f); p.addRoundRect(oval, 2f, 2f, Path.Direction.CW)
+                for (x in listOf(8f, 11f, 14f)) p.addCircle(x, 11.5f, 0.4f, Path.Direction.CW)
+                p.moveTo(9f, 15f); p.lineTo(15f, 15f)
+                p.moveTo(9.5f, 4.5f); p.lineTo(14.5f, 4.5f)
+            }
+            Id.DOCK -> {
+                p.moveTo(4f, 20f); p.lineTo(20f, 20f)
+                p.moveTo(12f, 4f); p.lineTo(12f, 15f); p.moveTo(7.5f, 10.5f); p.lineTo(12f, 15f); p.lineTo(16.5f, 10.5f)
+            }
+            Id.RESIZE -> {
+                p.moveTo(4f, 12f); p.lineTo(20f, 12f)
+                p.moveTo(8f, 8f); p.lineTo(4f, 12f); p.lineTo(8f, 16f)
+                p.moveTo(16f, 8f); p.lineTo(20f, 12f); p.lineTo(16f, 16f)
             }
             Id.CLOSE -> { p.moveTo(6f, 6f); p.lineTo(18f, 18f); p.moveTo(18f, 6f); p.lineTo(6f, 18f) }
             Id.LEFT -> { p.moveTo(20f, 12f); p.lineTo(4f, 12f); p.moveTo(10f, 6f); p.lineTo(4f, 12f); p.lineTo(10f, 18f) }

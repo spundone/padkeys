@@ -2,6 +2,7 @@ package dev.padkeys
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
@@ -9,10 +10,13 @@ import android.graphics.Canvas
 import android.icu.text.BreakIterator
 import android.inputmethodservice.InputMethodService
 import android.os.Build
+import android.media.AudioManager
 import android.os.SystemClock
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -38,6 +42,9 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     SharedPreferences.OnSharedPreferenceChangeListener, KeyActions, ToolbarListener, PanelListener {
 
     private var root: KeyboardRoot? = null
+    private var host: FloatHost? = null
+    /** The heights the input view's ancestors had before floating mode stretched them. */
+    private val docked = HashMap<View, Int>()
     private var keyboard: KeyboardView? = null
     private var strip: SuggestionStrip? = null
     private var emojiPanel: EmojiPanel? = null
@@ -94,12 +101,20 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         val ed = EditPanel(this).also { it.listener = this }
         val vp = VoicePanel(this).also { it.listener = this; it.voice = voiceButtons; it.engine = voice }
         val bar = OneHandBar(this, onExpand = { Prefs.oneHanded = false }, onSwap = { Prefs.oneHandLeft = !Prefs.oneHandLeft })
-        val r = KeyboardRoot(this, st, kb, listOf(em, cp, ed, vp), bar)
+        lateinit var h: FloatHost
+        val handle = FloatHandle(this,
+            onMove = { dx, dy -> h.moveBy(dx, dy) },
+            onResize = { dx -> h.resizeBy(dx) },
+            onDone = { Prefs.setFloatPlace(landscape, h.fx, h.fy, h.widthPx) },
+            onDock = { Prefs.floating = false })
+        val r = KeyboardRoot(this, st, kb, listOf(em, cp, ed, vp), bar, handle)
+        h = FloatHost(this, r)
+        host = h
         root = r; keyboard = kb; strip = st
         emojiPanel = em; clipPanel = cp; editPanel = ed; voicePanel = vp
         openTool = null
         applySettings()
-        return r
+        return h
     }
 
     /** The keyboard stays below the app in landscape too (no full-screen text box). */
@@ -188,12 +203,20 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     // ------------------------------------------------------------------ toolbar and panels
 
     /** The toolbar's buttons: voice only when the phone has a voice typing keyboard turned on. */
-    private fun toolset(): List<Tool> = Tool.entries.filter { it != Tool.VOICE || (Prefs.voiceKey && (voice.available || Voice.find(this) != null)) }
+    private fun toolset(): List<Tool> = Tool.entries.filter {
+        when (it) {
+            Tool.VOICE -> Prefs.voiceKey && (voice.available || Voice.find(this) != null)
+            Tool.ONE_HAND -> !Prefs.floating // a floating keyboard is already small
+            Tool.FLOAT -> !barMode
+            else -> true
+        }
+    }
 
     override fun onTool(tool: Tool) {
         when (tool) {
             Tool.EMOJI, Tool.CLIPBOARD, Tool.EDIT -> if (openTool == tool) closePanel() else openPanel(tool)
             Tool.ONE_HAND -> Prefs.oneHanded = !Prefs.oneHanded
+            Tool.FLOAT -> Prefs.floating = !Prefs.floating
             Tool.VOICE -> when {
                 openTool == Tool.VOICE -> closePanel()
                 voice.available -> {
@@ -375,10 +398,54 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
         if (key == "learnedWords" || key == "recentEmoji" || key == "pinnedClips") return // written while typing
         if (key == "lastUpdateCheck" || key == "skippedUpdate" || key == "autoUpdateCheck") return // the settings app
+        if (key != null && key.startsWith("float") && key != "floating") return // dragged into place
         if (key == "clipboard" && !Prefs.clipboard) { Clips.clearRecent(); Clips.stop(); showClipOffer() }
         applySettings()
         if (key == "hardwareBar") updateInputViewShown()
         if (key == "suggestions") { Predict.reset(); refresh() }
+    }
+
+    /** Floating mode is on and applies (not in bar mode, where only a row of keys shows). */
+    private val floatingNow get() = Prefs.floating && !barMode
+
+    /**
+     * Floating mode: the input method window covers the screen (its height and the input view's ancestors stretched to
+     * fill it) so the keyboard can sit anywhere in it; docked, they go back to wrapping the keyboard.
+     */
+    private fun applyFloating() {
+        val h = host ?: return
+        val on = floatingNow
+        if (on) {
+            val (fx, fy, w) = Prefs.floatPlace(landscape)
+            h.fx = fx; h.fy = fy; h.widthPx = w
+        }
+        if (on == h.floating) { h.requestLayout(); return }
+        window?.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT,
+            if (on) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT)
+        stretchAncestors(h, on, docked)
+        h.setFloating(on)
+    }
+
+    private val floatRect = android.graphics.Rect()
+
+    /**
+     * Floating: the app keeps the whole screen (insets at the bottom of the window), and only the keyboard and the
+     * navigation bar's strip take touches; the rest of the window lets them through to the app.
+     */
+    override fun onComputeInsets(outInsets: Insets) {
+        super.onComputeInsets(outInsets)
+        val h = host ?: return
+        if (!h.floating || h.height == 0) return
+        val loc = IntArray(2)
+        h.getLocationInWindow(loc)
+        val bottom = loc[1] + h.height
+        outInsets.contentTopInsets = bottom
+        outInsets.visibleTopInsets = bottom
+        outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+        h.keyboardRect(floatRect)
+        floatRect.offset(loc[0], loc[1])
+        outInsets.touchableRegion.set(floatRect)
+        if (h.navStrip > 0) outInsets.touchableRegion.union(android.graphics.Rect(loc[0], bottom - h.navStrip, loc[0] + h.width, bottom))
     }
 
     /** Applies settings and the system's colors to the views. */
@@ -393,7 +460,8 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         kb.accents = Prefs.accents
         kb.deleteSwipe = Prefs.deleteSwipe
         strip?.toolset = toolset()
-        root?.oneHanded(Prefs.oneHanded, Prefs.oneHandLeft)
+        applyFloating()
+        root?.oneHanded(Prefs.oneHanded && !floatingNow, Prefs.oneHandLeft)
         kb.glide.enabled = Prefs.glide && GlideInput.allowed(info)
         kb.glide.showTrail = Prefs.glideTrail
         kb.fnRow = Prefs.fnRow
@@ -424,6 +492,11 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     // ------------------------------------------------------------------ keys
 
     override fun onText(text: String, meta: Int) {
+        if (actionShortcut(meta) && when (text.lowercase()) {
+                " " -> systemKey(KeyEvent.KEYCODE_ASSIST)
+                "h" -> systemKey(KeyEvent.KEYCODE_HOME)
+                else -> false
+            }) return
         val ic = currentInputConnection ?: return
         val shortcut = meta and (KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON or KeyEvent.META_META_ON) != 0
         val afterPick = autoSpace
@@ -505,6 +578,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     }
 
     override fun onKey(code: Int, meta: Int) {
+        if (systemKey(code) || (actionShortcut(meta) && code == KeyEvent.KEYCODE_DPAD_LEFT && systemKey(KeyEvent.KEYCODE_BACK))) return
         val ic = currentInputConnection ?: return
         autoSpace = false
         lastSpaceAt = 0
@@ -515,6 +589,49 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
             else -> sendKey(ic, code, meta)
         }
     }
+
+    /**
+     * The Googlebook action row (and Action / Win shortcuts): Android's Back and Home, media, volume, the assistant
+     * and PadKeys' own panels. A keyboard app can't press the system's keys, so each does the same thing through an
+     * API instead (Back goes to the app, as Back from a keyboard does). False for every other key.
+     */
+    private fun systemKey(code: Int): Boolean {
+        val audio = getSystemService(AudioManager::class.java)
+        fun volume(dir: Int) = audio?.adjustSuggestedStreamVolume(dir, AudioManager.USE_DEFAULT_STREAM_TYPE, AudioManager.FLAG_SHOW_UI)
+        when (code) {
+            KeyEvent.KEYCODE_BACK -> {
+                val ic = currentInputConnection ?: return true
+                val t = SystemClock.uptimeMillis()
+                for (a in intArrayOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP))
+                    ic.sendKeyEvent(KeyEvent(t, t, a, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
+                        KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE))
+            }
+            KeyEvent.KEYCODE_HOME -> launch(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
+            KeyEvent.KEYCODE_ASSIST ->
+                if (!launch(Intent(Intent.ACTION_ASSIST))) launch(Intent(Intent.ACTION_VOICE_COMMAND))
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                val t = SystemClock.uptimeMillis()
+                audio?.dispatchMediaKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0))
+                audio?.dispatchMediaKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_UP, code, 0))
+            }
+            KeyEvent.KEYCODE_VOLUME_MUTE -> volume(AudioManager.ADJUST_TOGGLE_MUTE)
+            KeyEvent.KEYCODE_VOLUME_DOWN -> volume(AudioManager.ADJUST_LOWER)
+            KeyEvent.KEYCODE_VOLUME_UP -> volume(AudioManager.ADJUST_RAISE)
+            KeyboardView.CODE_HIDE -> requestHideSelf(0)
+            KeyboardView.CODE_VOICE -> onTool(Tool.VOICE)
+            KeyboardView.CODE_EMOJI -> onTool(Tool.EMOJI)
+            KeyboardView.CODE_CLIPBOARD -> onTool(Tool.CLIPBOARD)
+            else -> return false
+        }
+        return true
+    }
+
+    /** Action (or Win) held in an ordinary field: Googlebook's Action + Space (assistant), + H (home), + Left (back). */
+    private fun actionShortcut(meta: Int) = meta and KeyEvent.META_META_ON != 0 && !field.raw
+
+    private fun launch(i: Intent): Boolean = try {
+        startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (_: ActivityNotFoundException) { false } catch (_: SecurityException) { false }
 
     /** Modifier key codes sent down as real key presses, so each gets its up even if the setting changes meanwhile. */
     private val realDown = HashSet<Int>()
@@ -650,7 +767,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         Haptics.soft(0.4f)
     }
 
-    /** Next layout for this orientation: Phone → Laptop → 65% → Full → Split. */
+    /** Next layout for this orientation: Phone → Laptop → 65% → Full → Split → Googlebook. */
     override fun onLayoutButton() {
         val all = KbLayout.entries
         val next = all[(all.indexOf(Prefs.layout(landscape)) + 1) % all.size]
@@ -684,8 +801,9 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
 @SuppressLint("ViewConstructor")
 class KeyboardRoot(
     ctx: Context, private val strip: SuggestionStrip, private val keyboard: KeyboardView,
-    private val panels: List<View> = emptyList(), private val bar: View? = null,
+    private val panels: List<View> = emptyList(), private val bar: View? = null, private val handle: View? = null,
 ) : LinearLayout(ctx) {
+    private var isFloating = false
     private val deck = object : FrameLayout(ctx) {
         // The keys ask their parent to redraw for preview bubbles and popups, which this root draws.
         override fun invalidate() { super.invalidate(); this@KeyboardRoot.invalidate() }
@@ -706,6 +824,7 @@ class KeyboardRoot(
     init {
         orientation = VERTICAL
         setWillNotDraw(false)
+        handle?.let { it.visibility = GONE; addView(it, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)) }
         addView(strip, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         deck.addView(keyboard, FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         for (p in panels) {
@@ -720,9 +839,23 @@ class KeyboardRoot(
             val bottom = if (Build.VERSION.SDK_INT >= 30)
                 insets.getInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.captionBar()).bottom
             else @Suppress("DEPRECATION") insets.systemWindowInsetBottom
-            v.setPadding(0, 0, 0, bottom)
+            v.setPadding(0, 0, 0, if (isFloating) 0 else bottom)
+            lastBottom = bottom
             insets
         }
+    }
+
+    private var lastBottom = 0
+
+    /** Floating mode: the drag [handle] on top, rounded corners and a shadow, no navigation bar padding. */
+    fun floating(on: Boolean) {
+        isFloating = on
+        handle?.visibility = if (on) VISIBLE else GONE
+        setPadding(0, 0, 0, if (on) 0 else lastBottom)
+        val d = resources.displayMetrics.density
+        outlineProvider = if (on) RoundOutline(16 * d) else ViewOutlineProvider.BACKGROUND
+        clipToOutline = on
+        elevation = if (on) 8 * d else 0f
     }
 
     /** Bar mode (hardware keyboard): just the keys, no suggestion strip. */

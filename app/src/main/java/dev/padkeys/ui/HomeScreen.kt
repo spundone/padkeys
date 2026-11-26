@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Dialpad
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.PanTool
+import androidx.compose.material.icons.rounded.PictureInPicture
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Check
@@ -376,8 +377,12 @@ private fun LayoutItem(index: Int, count: Int, icon: ImageVector, title: String,
         supportingContent = {
             Column {
                 Text(layout.blurb)
-                Choice(layoutLabels, KbLayout.entries.indexOf(layout)) { i ->
-                    layout = KbLayout.entries[i]; Prefs.setLayout(landscape, layout)
+                // Two rows of three, so names like "Googlebook" fit on a phone.
+                val sel = KbLayout.entries.indexOf(layout)
+                layoutLabels.chunked(3).forEachIndexed { row, labels ->
+                    Choice(labels, sel - row * 3) { i ->
+                        layout = KbLayout.entries[row * 3 + i]; Prefs.setLayout(landscape, layout)
+                    }
                 }
             }
         },
@@ -387,12 +392,12 @@ private fun LayoutItem(index: Int, count: Int, icon: ImageVector, title: String,
 @Composable
 private fun KeyboardSettings() {
     Section("Layout") {
-        LayoutItem(0, 5, Icons.Rounded.Smartphone, "Upright", landscape = false)
-        LayoutItem(1, 5, Icons.Rounded.StayCurrentLandscape, "Sideways", landscape = true)
+        LayoutItem(0, 6, Icons.Rounded.Smartphone, "Upright", landscape = false)
+        LayoutItem(1, 6, Icons.Rounded.StayCurrentLandscape, "Sideways", landscape = true)
         var height by remember { mutableFloatStateOf(Prefs.height) }
         SegmentedListItem(
             onClick = {},
-            shapes = ListItemDefaults.segmentedShapes(2, 5),
+            shapes = ListItemDefaults.segmentedShapes(2, 6),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.Height) },
             supportingContent = {
@@ -403,7 +408,7 @@ private fun KeyboardSettings() {
         var hand by remember { mutableIntStateOf(if (!Prefs.oneHanded) 0 else if (Prefs.oneHandLeft) 1 else 2) }
         SegmentedListItem(
             onClick = {},
-            shapes = ListItemDefaults.segmentedShapes(3, 5),
+            shapes = ListItemDefaults.segmentedShapes(3, 6),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.PanTool) },
             supportingContent = {
@@ -417,8 +422,14 @@ private fun KeyboardSettings() {
                 }
             },
         ) { Text("One-handed") }
+        var floating by remember { mutableStateOf(Prefs.floating) }
+        SwitchItem(4, 6, Icons.Rounded.PictureInPicture, "Floating keyboard",
+            "A smaller keyboard you can drag anywhere: move it by the bar on top, resize it from the bar's right end, " +
+                "dock it with the button on the left. The app keeps the whole screen. Also in the toolbar", floating) {
+            floating = it; Prefs.floating = it
+        }
         var pad by remember { mutableStateOf(Prefs.numberPad) }
-        SwitchItem(4, 5, Icons.Rounded.Dialpad, "Number pad",
+        SwitchItem(5, 6, Icons.Rounded.Dialpad, "Number pad",
             "A number or phone pad in number, phone and date fields", pad) { pad = it; Prefs.numberPad = it }
     }
 

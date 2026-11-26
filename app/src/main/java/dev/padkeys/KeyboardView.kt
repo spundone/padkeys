@@ -26,7 +26,8 @@ enum class KbLayout(val label: String, val blurb: String) {
     LAPTOP("Laptop", "Five rows like a laptop. Fn + number row = F1–F12, Fn + Esc = `"),
     COMPACT_65("65%", "Laptop rows plus a Del, PgUp, PgDn, End column. Fn + number = F-key"),
     FULL("Full", "Separate F-row, numbers and arrows"),
-    SPLIT("Split", "Two even halves at the edges for your thumbs, arrows on the right, the TrackPoint in the middle (landscape, tablets)");
+    SPLIT("Split", "Two even halves at the edges for your thumbs, arrows on the right, the TrackPoint in the middle (landscape, tablets)"),
+    GOOGLEBOOK("Googlebook", "Like a Googlebook: a row of Back, Home, media, volume and mic keys (Fn for F1–F12), the launcher key where Caps is, and an assistant key");
 
     companion object {
         fun from(name: String?, def: KbLayout) = entries.firstOrNull { it.name == name } ?: def
@@ -82,6 +83,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val h: Float = 1f,
         /** Held down, it repeats (Backspace, Delete, arrows). */
         val repeat: Boolean = false,
+        /** Drawn instead of [label] (the Googlebook action row). */
+        val icon: Icons.Id? = null,
     ) {
         val rect = RectF()
         var gx = 0f
@@ -411,10 +414,41 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 g.w = SPLIT_LEFT + SPLIT_GAP + SPLIT_RIGHT
                 nubGx = SPLIT_LEFT + SPLIT_GAP / 2; nubGy = 3f
             }
+            KbLayout.GOOGLEBOOK -> {
+                // A Googlebook keyboard: an action row (Esc, Android's Back and Home, media, volume, mic) that gives
+                // F1–F12 with Fn, the launcher (Action) key where Caps Lock would be, and the assistant key between
+                // Fn and Alt. Delete is Fn + Backspace, Caps Lock a double tap on Shift.
+                val top = 0.75f
+                fun act(lbl: String, code: Int, icon: Icons.Id, n: Int, repeat: Boolean = false) =
+                    Key(lbl, code, 15f / 13, small = true, h = top, fnCode = fKey(n), fnLabel = "F$n", repeat = repeat, icon = icon)
+                g.row(0f, 0f, listOf(Key("Esc", KeyEvent.KEYCODE_ESCAPE, 15f / 13, small = true, h = top),
+                    act("Back", KeyEvent.KEYCODE_BACK, Icons.Id.NAV_BACK, 1),
+                    act("Home", KeyEvent.KEYCODE_HOME, Icons.Id.NAV_HOME, 2),
+                    act("Hide keyboard", CODE_HIDE, Icons.Id.HIDE_KEYBOARD, 3),
+                    act("Previous", KeyEvent.KEYCODE_MEDIA_PREVIOUS, Icons.Id.PREVIOUS, 4),
+                    act("Play / pause", KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, Icons.Id.PLAY_PAUSE, 5),
+                    act("Next", KeyEvent.KEYCODE_MEDIA_NEXT, Icons.Id.NEXT, 6),
+                    act("Mute", KeyEvent.KEYCODE_VOLUME_MUTE, Icons.Id.MUTE, 7),
+                    act("Volume down", KeyEvent.KEYCODE_VOLUME_DOWN, Icons.Id.VOLUME_DOWN, 8, repeat = true),
+                    act("Volume up", KeyEvent.KEYCODE_VOLUME_UP, Icons.Id.VOLUME_UP, 9, repeat = true),
+                    act("Voice typing", CODE_VOICE, Icons.Id.MIC, 10),
+                    act("Emoji", CODE_EMOJI, Icons.Id.EMOJI, 11),
+                    act("Clipboard", CODE_CLIPBOARD, Icons.Id.CLIPBOARD, 12),
+                ))
+                g.row(top, 0f, listOf(s("`", "~")) + (0..9).map { digit(it) } + minus() + equal() + bksp())
+                g.row(top + 1, 0f, listOf(tab()) + letters("qwertyuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.5f))
+                g.row(top + 2, 0f, listOf(Key("Launcher", w = 1.75f, small = true, icon = Icons.Id.LAUNCHER,
+                    mod = KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON)) +
+                    letters("asdfghjkl") + s(";", ":") + s("'", "\"") + enter())
+                g.row(top + 3, 0f, listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift())
+                g.row(top + 4, 0f, listOf(ctrl(), fnKey(1f), Key("Assistant", KeyEvent.KEYCODE_ASSIST, small = true, icon = Icons.Id.ASSIST),
+                    alt(), space(4.5f), alt(true, 1f), ctrl(true, 1f), left(), up(), down(), right()))
+                nubGx = 6.75f; nubGy = top + 3
+            }
         }
         if (!trackPoint) { nubGx = -1f; nubGy = -1f }
         // Function row: Esc and F1–F12 across the top (Phone has Esc in its toolbar, so just the F-keys there).
-        if (fnRow && l != KbLayout.FULL) {
+        if (fnRow && l != KbLayout.FULL && l != KbLayout.GOOGLEBOOK) {
             val fh = if (l == KbLayout.PHONE) 0.7f else 0.75f
             for (k in g.keys) k.gy += fh
             g.h += fh
@@ -927,6 +961,11 @@ class KeyboardView(ctx: Context) : View(ctx) {
         const val CODE_LETTERS = -2
         /** The number pad's ABC key: the full keyboard. */
         const val CODE_FULL_KEYBOARD = -3
+        /** Googlebook action row: hide the keyboard, voice typing, emoji and clipboard (handled by the service). */
+        const val CODE_HIDE = -4
+        const val CODE_VOICE = -5
+        const val CODE_EMOJI = -6
+        const val CODE_CLIPBOARD = -7
         /** Split: the halves' widths and the smallest gap between them, in key widths. */
         private const val SPLIT_LEFT = 7.25f
         private const val SPLIT_RIGHT = 8.25f
@@ -1123,6 +1162,9 @@ class KeyboardView(ctx: Context) : View(ctx) {
             if (icon != null) {
                 val size = min(min(k.rect.height(), k.rect.width()) * (if (role == Role.TOOLBAR) 0.42f else 0.5f), 24 * density)
                 drawIcon(c, icon, k.rect.centerX(), cy, size, textColor)
+            } else if (k.icon != null && !(fnActive && k.fnLabel != null)) {
+                val size = min(min(k.rect.height(), k.rect.width()) * 0.6f, 22 * density)
+                Icons.draw(c, k.icon, k.rect.centerX(), cy, size, textColor)
             } else if (label.isNotBlank()) {
                 paint.color = textColor
                 c.drawText(label, k.rect.centerX(), cy - (paint.ascent() + paint.descent()) / 2, paint)

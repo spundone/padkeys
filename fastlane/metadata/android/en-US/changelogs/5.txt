@@ -1,0 +1,1 @@
+Googlebook layout: a top row of Back, Home, media, volume, mic, emoji and clipboard keys (F1–F12 with Fn), the launcher key where Caps is and an assistant key. Floating keyboard: a smaller window you can drag anywhere and resize, over the app instead of pushing it up. Layout picker in two rows.
