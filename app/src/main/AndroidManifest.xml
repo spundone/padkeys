@@ -2,6 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Voice typing in the keyboard, with the phone's speech recognizer (asked for the first time you tap the mic). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Find the phone's speech recognition service (Google's on most phones). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
     <!-- In-app updates, from the settings screen only (never the keyboard): check GitHub's latest release, download
          its APK and hand it to Android's installer. -->
     <uses-permission android:name="android.permission.INTERNET" />

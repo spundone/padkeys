@@ -1,0 +1,1 @@
+Voice typing in PadKeys using the phone's speech recognizer (Google's on most phones). Ctrl, Alt and Win act like hardware keys (hold or lock Alt and tap Tab for Alt+Tab in remote desktops, terminals, VMs); new Win key. Split layout redone with even halves, the TrackPoint in the gap and keys sized for tablets.

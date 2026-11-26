@@ -43,6 +43,9 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     private var emojiPanel: EmojiPanel? = null
     private var clipPanel: ClipboardPanel? = null
     private var editPanel: EditPanel? = null
+    private var voicePanel: VoicePanel? = null
+    /** In-keyboard voice typing (the phone's speech recognizer). */
+    private lateinit var voice: VoiceTyping
     /** The panel shown in the keys' place, by its toolbar button (null: the keys). */
     private var openTool: Tool? = null
     /** The editor's selection, as last reported. */
@@ -70,10 +73,12 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         Haptics.init(this)
         Predict.init(this)
         Prefs.listen(this)
+        voice = VoiceTyping(this, voiceCallback)
     }
 
     override fun onDestroy() {
         Prefs.unlisten(this)
+        voice.destroy()
         Predict.listener = null
         Predict.close()
         super.onDestroy()
@@ -87,10 +92,11 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         val em = EmojiPanel(this).also { it.listener = this }
         val cp = ClipboardPanel(this).also { it.listener = this }
         val ed = EditPanel(this).also { it.listener = this }
+        val vp = VoicePanel(this).also { it.listener = this; it.voice = voiceButtons; it.engine = voice }
         val bar = OneHandBar(this, onExpand = { Prefs.oneHanded = false }, onSwap = { Prefs.oneHandLeft = !Prefs.oneHandLeft })
-        val r = KeyboardRoot(this, st, kb, listOf(em, cp, ed), bar)
+        val r = KeyboardRoot(this, st, kb, listOf(em, cp, ed, vp), bar)
         root = r; keyboard = kb; strip = st
-        emojiPanel = em; clipPanel = cp; editPanel = ed
+        emojiPanel = em; clipPanel = cp; editPanel = ed; voicePanel = vp
         openTool = null
         applySettings()
         return r
@@ -124,6 +130,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
 
     override fun onStartInputView(editorInfo: EditorInfo, restarting: Boolean) {
         super.onStartInputView(editorInfo, restarting)
+        if (!restarting) realDown.clear() // a new field: nothing is held there
         info = editorInfo
         field = Field.of(editorInfo)
         hasSelection = editorInfo.initialSelStart != editorInfo.initialSelEnd
@@ -181,13 +188,22 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     // ------------------------------------------------------------------ toolbar and panels
 
     /** The toolbar's buttons: voice only when the phone has a voice typing keyboard turned on. */
-    private fun toolset(): List<Tool> = Tool.entries.filter { it != Tool.VOICE || (Prefs.voiceKey && Voice.find(this) != null) }
+    private fun toolset(): List<Tool> = Tool.entries.filter { it != Tool.VOICE || (Prefs.voiceKey && (voice.available || Voice.find(this) != null)) }
 
     override fun onTool(tool: Tool) {
         when (tool) {
             Tool.EMOJI, Tool.CLIPBOARD, Tool.EDIT -> if (openTool == tool) closePanel() else openPanel(tool)
             Tool.ONE_HAND -> Prefs.oneHanded = !Prefs.oneHanded
-            Tool.VOICE -> { closePanel(); Voice.start(this) }
+            Tool.VOICE -> when {
+                openTool == Tool.VOICE -> closePanel()
+                voice.available -> {
+                    openPanel(Tool.VOICE)
+                    voice.reset()
+                    voicePanel?.hasVoiceKeyboard = Voice.find(this) != null
+                    voice.start()
+                }
+                else -> { closePanel(); Voice.start(this) } // no recognizer: the phone's voice keyboard
+            }
         }
     }
 
@@ -197,11 +213,13 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         Tool.EMOJI -> emojiPanel
         Tool.CLIPBOARD -> clipPanel
         Tool.EDIT -> editPanel
+        Tool.VOICE -> voicePanel
         else -> null
     }
 
     private fun openPanel(tool: Tool) {
         val p = panelFor(tool) ?: return
+        if (openTool == Tool.VOICE && tool != Tool.VOICE) stopVoice()
         keyboard?.releaseEverything()
         openTool = tool
         p.open()
@@ -211,6 +229,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
 
     private fun closePanel() {
         if (openTool == null) return
+        if (openTool == Tool.VOICE) stopVoice()
         openTool = null
         root?.showPanel(null)
         strip?.activeTool = null
@@ -234,6 +253,79 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     }
 
     override fun onPanelClose() = closePanel()
+
+    // ------------------------------------------------------------------ voice typing
+
+    /** Text of the current utterance is in the field as composing (underlined) text. */
+    private var voiceComposing = false
+    /** For the current utterance: a space before it, and a capital first letter. */
+    private var voiceLead = ""
+    private var voiceCap = false
+
+    /** Decided once per utterance, before its composing text is in the field. */
+    private fun beginUtterance(ic: InputConnection) {
+        if (voiceComposing) return
+        val before = ic.getTextBeforeCursor(64, 0)?.toString().orEmpty()
+        voiceLead = if (before.isNotEmpty() && !before.last().isWhitespace() && before.last() !in "([{\"'/-") " " else ""
+        val end = before.trimEnd().lastOrNull()
+        voiceCap = Prefs.autoCaps && field.autoCap && (end == null || end in ".!?")
+    }
+
+    private fun voiceText(t: String) = voiceLead + if (voiceCap) t.replaceFirstChar { it.uppercase() } else t
+
+    private fun stopVoice() {
+        voice.cancel()
+        if (voiceComposing) { currentInputConnection?.finishComposingText(); voiceComposing = false }
+        voicePanel?.heard = ""
+    }
+
+    private val voiceCallback = object : VoiceTyping.Callback {
+        override fun onVoicePartial(text: String) {
+            val ic = currentInputConnection ?: return
+            beginUtterance(ic)
+            ic.setComposingText(voiceText(text), 1)
+            voiceComposing = true
+            voicePanel?.heard = text
+        }
+
+        override fun onVoiceFinal(text: String) {
+            val ic = currentInputConnection ?: return
+            if (text.isNotBlank()) {
+                beginUtterance(ic)
+                ic.commitText(voiceText(text), 1)
+                autoSpace = false
+                AutoCorrect.undo = null
+            } else if (voiceComposing) ic.finishComposingText()
+            voiceComposing = false
+            voicePanel?.heard = ""
+        }
+
+        override fun onVoiceState() { voicePanel?.invalidate() }
+        override fun onVoiceLevel(level: Float) { voicePanel?.setLevel(level) }
+    }
+
+    private val voiceButtons = object : VoicePanel.VoiceListener {
+        override fun onMicTap() {
+            when {
+                voice.listening -> voice.stop()
+                voice.available && !voice.hasPermission -> {
+                    // A keyboard can't ask for permissions itself: the app asks, then closes back to where you were.
+                    try {
+                        startActivity(Intent(this@PadKeysService, MainActivity::class.java)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(MainActivity.EXTRA_ASK_MIC, true)
+                            // Typing in another app: go back to it afterwards (not when typing in PadKeys' own field).
+                            .putExtra(MainActivity.EXTRA_RETURN, info?.packageName != packageName))
+                    } catch (_: Exception) {}
+                }
+                else -> voice.start()
+            }
+        }
+
+        override fun onVoiceKeyboard() {
+            closePanel()
+            Voice.start(this@PadKeysService)
+        }
+    }
 
     // ------------------------------------------------------------------ delete-key swipe
 
@@ -424,6 +516,29 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         }
     }
 
+    /** Modifier key codes sent down as real key presses, so each gets its up even if the setting changes meanwhile. */
+    private val realDown = HashSet<Int>()
+
+    /**
+     * Modifiers as hardware keys: a real down when Ctrl / Alt / Win is held or latched and a real up when it's let go,
+     * so apps that read raw keys (remote desktops, terminals, VMs) see Alt held across several Tabs. Shift only goes
+     * to those apps: in text fields it's carried by each key instead (a lone Shift press confuses Android's editors).
+     */
+    override fun onModifier(code: Int, down: Boolean, meta: Int) {
+        val ic = currentInputConnection
+        if (down) {
+            val real = when (Prefs.realModifiers) { 1 -> true; 2 -> false; else -> field.raw }
+            val shift = code == KeyEvent.KEYCODE_SHIFT_LEFT || code == KeyEvent.KEYCODE_SHIFT_RIGHT
+            if (!real || (shift && !field.raw) || ic == null) return
+            realDown += code
+        } else if (!realDown.remove(code) || ic == null) return
+        val t = SystemClock.uptimeMillis()
+        val flags = KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
+        if (BuildConfig.DEBUG) android.util.Log.d("PadKeys", "modifier ${KeyEvent.keyCodeToString(code)} ${if (down) "down" else "up"}")
+        ic.sendKeyEvent(KeyEvent(t, t, if (down) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP, code, 0, meta,
+            KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags))
+    }
+
     override fun onCursor(code: Int, meta: Int) {
         val ic = currentInputConnection ?: return
         autoSpace = false
@@ -482,6 +597,7 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
 
     /** A key press and release, marked as coming from a soft keyboard. */
     private fun sendKey(ic: InputConnection, code: Int, meta: Int) {
+        if (BuildConfig.DEBUG) android.util.Log.d("PadKeys", "key ${KeyEvent.keyCodeToString(code)} meta=0x${Integer.toHexString(meta)}")
         val t = SystemClock.uptimeMillis()
         val flags = KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
         ic.sendKeyEvent(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0, meta, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, flags))

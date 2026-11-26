@@ -36,7 +36,9 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
     skipped.
   - **Text editing:** arrows, Select (arrows extend the selection), Home / End, Select all, Copy, Cut, Paste.
   - **One-handed mode:** the keys shrink to one side, with buttons to switch sides or go back to full width.
-  - **Voice typing:** switches to the phone's voice typing keyboard (shown only when there is one).
+  - **Voice typing:** speak and PadKeys types, with the phone's speech recognizer (Google's on most phones; the
+    audio goes to that service, not to PadKeys, and PadKeys asks for the microphone the first time). Words show as
+    you speak. Phones without a recognizer switch to their voice typing keyboard instead.
 - **Suggestions:** completions from a bundled list of 40,000 common English words and corrections from the phone's
   spell checker, for the word before the cursor. Off in password, number and no-suggestion fields.
 - **Learning** (opt-in, off by default): remembers words you type, only on the phone, never from passwords or fields
@@ -44,8 +46,11 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
 - Material 3 Expressive look: rounded tonal keys that morph toward a pill when pressed, a primary-color Enter with
   drawn action icons, a flat toolbar row, Google Sans where the phone has it; the settings app uses a collapsing
   large top bar, grouped list items and connected toggle groups.
-- **TrackPoint:** a red nub between G, H and B (all layouts but Split). Push it to move the cursor, faster the
+- **TrackPoint:** a red nub between G, H and B (in the gap on Split). Push it to move the cursor, faster the
   further you push, up and down by line; with Shift on it selects.
+- **Modifiers like a hardware keyboard:** Ctrl, Alt and Win are real held keys in remote desktop and terminal apps
+  (or everywhere, if you choose): hold or lock Alt and tap Tab for Alt+Tab, Ctrl+Alt+Del, Win+E. A Win key sits in
+  the bottom row of the PC layouts. Android's own system shortcuts only answer physical keyboards.
 - **PC keys:** an optional function row (Esc, F1–F12) above every layout, and with a hardware keyboard attached
   PadKeys stays on screen as a slim bar of Esc, F1–F12, Del and (on wide screens) Home, End, PgUp, PgDn.
 - Themes like PadBridge's: system / light / dark; PadKeys blue, wallpaper, a custom palette grown from one color, or
@@ -92,7 +97,8 @@ From adb: `adb shell ime enable dev.padkeys.debug/dev.padkeys.PadKeysService` an
 | `AutoCorrect.kt` | Autocorrect and its undo |
 | `Toolbar.kt`, `Panels.kt` | Toolbar tools and drawn icons; the emoji, clipboard and text editing panels |
 | `Emoji.kt`, `Clips.kt` | The emoji set and recents; clipboard history and pins |
-| `OneHand.kt` | One-handed mode's side buttons, voice typing hand-over |
+| `OneHand.kt` | One-handed mode's side buttons, hand-over to the voice keyboard |
+| `VoiceTyping.kt` | Voice typing with the speech recognizer, and its panel |
 | `SuggestionStrip.kt` | Suggestions, toolbar, paste chip, layout and settings buttons |
 | `Predict.kt` | Word list completions, spell checker corrections, opt-in learned words |
 | `Glide.kt`, `SwipeDecoder.kt`, `GlideInput.kt` | Glide typing: gesture tracking, trail and preview; SHARK2-style template-matching decoder over the word list; committing, spacing, alternatives and Backspace |

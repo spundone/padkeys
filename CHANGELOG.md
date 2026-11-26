@@ -6,6 +6,26 @@ All notable changes to PadKeys are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.3.0] – 2026-11-26
+
+### Added
+- Voice typing inside PadKeys: the mic opens a voice panel that listens with the phone's speech recognizer (Google's
+  on most phones). Words appear in the field as you speak and are committed when recognized, with a space before
+  them and a capital at the start of a sentence. The panel has ABC, Space, Backspace and Enter, and a button for
+  the phone's voice keyboard. Asks for the microphone the first time; the audio goes to the speech service, not
+  to PadKeys. Phones without a recognizer still switch to the voice keyboard as before.
+- Modifiers as real keys: Ctrl, Alt, Win (and Shift in terminals) go down when pressed or latched and up when
+  released or used, like a hardware keyboard, so holding (or locking) Alt across several Tabs is Alt+Tab, and
+  Ctrl+Alt+Del or Win+E reach remote desktops, terminals and VMs. Automatic (apps that take raw keys) by default;
+  can be set to Always or Off under PC keys.
+- A Win key in the bottom row of Laptop, 65%, Full and Split.
+
+### Changed
+- Split layout redone: two even blocks pinned to the screen edges with letters in straight columns, Esc and ` on
+  the left, arrows and Del in the right half's corner (no more PgUp / PgDn / End column), and a gap that grows with
+  the screen so keys stay thumb-sized on tablets. The TrackPoint sits in the gap; with the function row on, F1–F6
+  go over the left half and F7–F12 over the right.
+
 ## [1.2.0] – 2026-11-26
 
 ### Added

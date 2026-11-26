@@ -47,6 +47,7 @@ import androidx.compose.material.icons.rounded.DarkMode
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Mouse
 import androidx.compose.material.icons.rounded.KeyboardAlt
+import androidx.compose.material.icons.rounded.KeyboardCommandKey
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Gavel
@@ -423,26 +424,45 @@ private fun KeyboardSettings() {
 
     Section("PC keys") {
         var fnRow by remember { mutableStateOf(Prefs.fnRow) }
-        SwitchItem(0, 3, Icons.Rounded.KeyboardAlt, "Function row",
+        SwitchItem(0, 4, Icons.Rounded.KeyboardAlt, "Function row",
             "Esc and F1–F12 always above the keys, like a laptop's top row, so F-keys don't need Fn", fnRow) {
             fnRow = it; Prefs.fnRow = it
         }
         var hw by remember { mutableStateOf(Prefs.hardwareBar) }
-        SwitchItem(1, 3, Icons.Rounded.Keyboard, "Stay on with a hardware keyboard",
+        SwitchItem(1, 4, Icons.Rounded.Keyboard, "Stay on with a hardware keyboard",
             "When a keyboard is plugged in or paired, PadKeys stays as a slim bar of Esc, F1–F12, Del and (on wide " +
                 "screens) Home, End, PgUp, PgDn, the keys tablet keyboards often lack", hw) { hw = it; Prefs.hardwareBar = it }
+        var real by remember { mutableIntStateOf(Prefs.realModifiers) }
+        SegmentedListItem(
+            onClick = {},
+            shapes = ListItemDefaults.segmentedShapes(2, 4),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.KeyboardCommandKey) },
+            supportingContent = {
+                Column {
+                    Text("Ctrl, Alt and Win go down when you press or latch them and up when you let go, like a " +
+                        "hardware keyboard: hold Alt and tap Tab to switch windows, Ctrl+Alt+Del, Win+E. " +
+                        when (real) {
+                            0 -> "Automatic: in remote desktop, terminal and other apps that take raw keys"
+                            1 -> "Always, in every app"
+                            else -> "Off: shortcuts are sent as single key combos"
+                        } + ". Android's own shortcuts (like its Alt+Tab) only answer real hardware keyboards")
+                    Choice(listOf("Automatic", "Always", "Off"), real) { real = it; Prefs.realModifiers = it }
+                }
+            },
+        ) { Text("Modifiers as real keys") }
         var tp by remember { mutableStateOf(Prefs.trackPoint) }
         var speed by remember { mutableFloatStateOf(Prefs.trackPointSpeed) }
         SegmentedListItem(
             onClick = { tp = !tp; Prefs.trackPoint = tp },
-            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            shapes = ListItemDefaults.segmentedShapes(3, 4),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.Mouse) },
             trailingContent = { CheckSwitch(tp) { tp = it; Prefs.trackPoint = it } },
             supportingContent = {
                 Column {
                     Text("A red nub between G, H and B, like a ThinkPad's. Push it to move the cursor: further is " +
-                        "faster, up and down by line. Turn Shift on to select. Not on Split")
+                        "faster, up and down by line. Turn Shift on to select. On Split it sits in the gap between the halves")
                     if (tp) {
                         Text("Speed · ${(speed * 100).toInt()}%", style = MaterialTheme.typography.labelLarge,
                             modifier = Modifier.padding(top = 8.dp))
@@ -540,10 +560,16 @@ private fun KeyboardSettings() {
             "Text you copy while the keyboard is open, kept in memory until PadKeys stops; pin items to keep them. " +
                 "Fresh copies are offered above the keys. Never passwords marked sensitive", clip) { clip = it; Prefs.clipboard = it }
         val voice = remember { Voice.find(ctx) != null }
+        val recognizer = remember { android.speech.SpeechRecognizer.isRecognitionAvailable(ctx) }
         var mic by remember { mutableStateOf(Prefs.voiceKey) }
         SwitchItem(1, 2, Icons.Rounded.Mic, "Voice typing button",
-            if (voice) "Switches to your phone's voice typing keyboard, which comes back here when done"
-            else "Your phone has no voice typing keyboard turned on, so the button is hidden", mic) { mic = it; Prefs.voiceKey = it }
+            when {
+                recognizer -> "Speak and PadKeys types it, using your phone's speech recognition (Google's on most " +
+                    "phones; the audio goes to it, not to PadKeys). Asks for the microphone the first time" +
+                    if (voice) ". The phone's voice keyboard is one tap away in the panel" else ""
+                voice -> "Switches to your phone's voice typing keyboard, which comes back here when done"
+                else -> "Your phone has no speech recognition or voice keyboard turned on, so the button is hidden"
+            }, mic) { mic = it; Prefs.voiceKey = it }
     }
 
     ThemeSettings()

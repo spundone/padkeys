@@ -28,7 +28,7 @@ interface ToolbarListener {
 object Icons {
     enum class Id {
         EMOJI, CLIPBOARD, EDIT, ONE_HAND, MIC, BACKSPACE, PIN, PINNED, CLOSE, LEFT, RIGHT, UP, DOWN, EXPAND, SWAP,
-        CLOCK, KEYBOARD, SELECT_ALL, COPY, CUT, PASTE, HOME, END, FORWARD_DELETE,
+        CLOCK, KEYBOARD, SELECT_ALL, COPY, CUT, PASTE, HOME, END, FORWARD_DELETE, RETURN,
     }
 
     private val path = Path()
@@ -46,6 +46,10 @@ object Icons {
         paint.strokeWidth = 1.8f
         var fill = false
         when (id) {
+            Id.RETURN -> {
+                p.moveTo(19f, 5f); p.lineTo(19f, 11f); p.quadTo(19f, 15f, 15f, 15f); p.lineTo(5f, 15f)
+                p.moveTo(9.5f, 10.5f); p.lineTo(5f, 15f); p.lineTo(9.5f, 19.5f)
+            }
             Id.EMOJI -> {
                 p.addCircle(12f, 12f, 9f, Path.Direction.CW)
                 p.addCircle(9f, 10f, 0.6f, Path.Direction.CW); p.addCircle(15f, 10f, 0.6f, Path.Direction.CW)

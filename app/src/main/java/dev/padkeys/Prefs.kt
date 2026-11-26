@@ -64,6 +64,15 @@ object Prefs {
         get() = bool("hardwareBar", true)
         set(v) = putBool("hardwareBar", v)
 
+    /**
+     * Ctrl, Alt, Win (and Shift in terminals) sent as real key presses, down while held or latched and up when let
+     * go, like a hardware keyboard, so Alt+Tab or Ctrl+Alt+Del reach remote desktops and terminals.
+     * 0 automatic (terminals, remote desktops and other apps that take raw keys), 1 always, 2 never.
+     */
+    var realModifiers: Int
+        get() = p.getInt("realModifiers", 0)
+        set(v) = p.edit().putInt("realModifiers", v).apply()
+
     /** A TrackPoint between G, H and B that moves the text cursor (Shift held: selects). */
     var trackPoint: Boolean
         get() = bool("trackPoint", true)

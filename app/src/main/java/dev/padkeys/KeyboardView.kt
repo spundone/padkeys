@@ -26,7 +26,7 @@ enum class KbLayout(val label: String, val blurb: String) {
     LAPTOP("Laptop", "Five rows like a laptop. Fn + number row = F1–F12, Fn + Esc = `"),
     COMPACT_65("65%", "Laptop rows plus a Del, PgUp, PgDn, End column. Fn + number = F-key"),
     FULL("Full", "Separate F-row, numbers and arrows"),
-    SPLIT("Split", "65% halves at each edge, for two thumbs (landscape, tablets)");
+    SPLIT("Split", "Two even halves at the edges for your thumbs, arrows on the right, the TrackPoint in the middle (landscape, tablets)");
 
     companion object {
         fun from(name: String?, def: KbLayout) = entries.firstOrNull { it.name == name } ?: def
@@ -52,6 +52,11 @@ class KeyboardView(ctx: Context) : View(ctx) {
         fun onKey(code: Int, meta: Int)
         /** One step of the space-bar cursor ([KeyEvent.KEYCODE_DPAD_LEFT] / RIGHT). */
         fun onCursor(code: Int, meta: Int)
+        /**
+         * A modifier ([code]: Ctrl, Alt, Win, Shift, left or right) went down or up, like on a hardware keyboard: down
+         * while held, latched or locked, up once released or used. [meta] is the modifier state after the change.
+         */
+        fun onModifier(code: Int, down: Boolean, meta: Int) {}
     }
 
     var listener: Listener? = null
@@ -81,6 +86,8 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val rect = RectF()
         var gx = 0f
         var gy = 0f
+        /** Split layout: in the right half, placed from the right half's own left edge ([gx] is relative to it). */
+        var right = false
         val isModifier get() = mod != 0 || fn
         val isText get() = code == 0 && !isModifier
         val isLetter get() = label.length == 1 && label[0].isLetter()
@@ -138,6 +145,9 @@ class KeyboardView(ctx: Context) : View(ctx) {
     private val heldDone = HashMap<Int, Key>()
     private var unitW = 1f
     private var unitH = 1f
+    /** Split layout: the halves' widths in grid units (0 otherwise). */
+    private var splitLeftW = 0f
+    private var splitRightW = 0f
 
     private val deckRect = RectF()
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -291,10 +301,12 @@ class KeyboardView(ctx: Context) : View(ctx) {
         fun alt(right: Boolean = false, w: Float = 1.25f, h: Float = 1f) = Key("Alt", w = w, small = true, h = h,
             mod = KeyEvent.META_ALT_ON or if (right) KeyEvent.META_ALT_RIGHT_ON else KeyEvent.META_ALT_LEFT_ON)
         fun fnKey(w: Float = 1f) = Key("Fn", fn = true, w = w, small = true)
+        fun win(w: Float = 1f) = Key("Win", w = w, small = true, mod = KeyEvent.META_META_ON or KeyEvent.META_META_LEFT_ON)
         fun del(w: Float = 1f) = sm("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, repeat = true)
         fun letters(str: String) = str.map { lt(it) }
 
         nubGx = -1f; nubGy = -1f
+        splitLeftW = 0f; splitRightW = 0f
         if (hardwareBar) {
             // With a hardware keyboard: one row of what tablet and folio keyboards often lack.
             val wide = resources.displayMetrics.run { widthPixels / density } >= 600
@@ -348,7 +360,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 g.row(1f, 0f, listOf(tab()) + letters("qwertyuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.5f))
                 g.row(2f, 0f, listOf(caps()) + letters("asdfghjkl") + s(";", ":") + s("'", "\"") + enter())
                 g.row(3f, 0f, listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift())
-                g.row(4f, 0f, listOf(ctrl(), fnKey(1.25f), alt(), space(5.25f), alt(true, 1f), ctrl(true, 1f),
+                g.row(4f, 0f, listOf(ctrl(), fnKey(1f), win(), alt(), space(4.5f), alt(true, 1f), ctrl(true, 1f),
                     left(), up(), down(), right()))
                 nubGx = 6.75f; nubGy = 3f
             }
@@ -358,43 +370,46 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 g.row(2f, 0f, listOf(tab()) + letters("qwertyuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.5f))
                 g.row(3f, 0f, listOf(caps()) + letters("asdfghjkl") + s(";", ":") + s("'", "\"") + enter())
                 g.row(4f, 0f, listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift())
-                g.row(5f, 0f, listOf(ctrl(), fnKey(1.25f), alt(), space(5.25f), alt(true, 1f), ctrl(true, 1f),
+                g.row(5f, 0f, listOf(ctrl(), fnKey(1f), win(), alt(), space(4.5f), alt(true, 1f), ctrl(true, 1f),
                     left(), up(), down(), right()))
                 nubGx = 6.75f; nubGy = 4f
             }
-            KbLayout.COMPACT_65, KbLayout.SPLIT -> {
-                // Rows of a 65% board, each as (left half, right half) so Split can pull them apart.
+            KbLayout.COMPACT_65 -> {
                 val rows = listOf(
-                    listOf(esc(grave = true)) + (0..5).map { digit(it) } to
-                        (6..9).map { digit(it) } + minus() + equal() + bksp() + del(),
-                    listOf(tab()) + letters("qwert") to
-                        letters("yuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.5f) + sm("PgUp", KeyEvent.KEYCODE_PAGE_UP),
-                    listOf(caps()) + letters("asdfg") to
-                        letters("hjkl") + s(";", ":") + s("'", "\"") + enter() + sm("PgDn", KeyEvent.KEYCODE_PAGE_DOWN),
-                    listOf(lshift()) + letters("zxcvb") to
-                        letters("nm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift(1.75f) + up() + sm("End", KeyEvent.KEYCODE_MOVE_END),
-                    listOf(ctrl(), fnKey(1.25f), alt()) to listOf(alt(true, 1f), ctrl(true, 1f)) + left() + down() + right(),
+                    listOf(esc(grave = true)) + (0..9).map { digit(it) } + minus() + equal() + bksp() + del(),
+                    listOf(tab()) + letters("qwertyuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.5f) + sm("PgUp", KeyEvent.KEYCODE_PAGE_UP),
+                    listOf(caps()) + letters("asdfghjkl") + s(";", ":") + s("'", "\"") + enter() + sm("PgDn", KeyEvent.KEYCODE_PAGE_DOWN),
+                    listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift(1.75f) + up() + sm("End", KeyEvent.KEYCODE_MOVE_END),
                 )
-                if (l == KbLayout.COMPACT_65) {
-                    rows.forEachIndexed { i, (a, b) ->
-                        val bottom = i == rows.lastIndex
-                        val leftW = a.sumOf { it.w.toDouble() }.toFloat()
-                        val rightW = b.sumOf { it.w.toDouble() }.toFloat()
-                        g.row(i.toFloat(), 0f, if (bottom) a + space(16f - leftW - rightW) + b else a + b)
-                    }
-                    nubGx = 6.75f; nubGy = 3f
-                } else {
-                    val leftMax = 7.25f
-                    val rightMax = 9.5f
-                    val total = leftMax + SPLIT_GAP + rightMax
-                    rows.forEachIndexed { i, (a, b) ->
-                        val bottom = i == rows.lastIndex
-                        val aa = if (bottom) a + space(leftMax - a.sumOf { it.w.toDouble() }.toFloat()) else a
-                        val bb = if (bottom) listOf(space(rightMax - b.sumOf { it.w.toDouble() }.toFloat())) + b else b
-                        g.row(i.toFloat(), 0f, aa)
-                        g.rowEndingAt(i.toFloat(), total, bb)
-                    }
-                }
+                rows.forEachIndexed { i, r -> g.row(i.toFloat(), 0f, r) }
+                val a = listOf(ctrl(), fnKey(1f), win(), alt()); val b = listOf(alt(true, 1f), ctrl(true, 1f)) + left() + down() + right()
+                g.row(4f, 0f, a + space(16f - a.sumOf { it.w.toDouble() }.toFloat() - b.sumOf { it.w.toDouble() }.toFloat()) + b)
+                nubGx = 6.75f; nubGy = 3f
+            }
+            KbLayout.SPLIT -> {
+                // Two halves pinned to the screen edges, each row flush at both ends so the halves are clean blocks
+                // under the thumbs. Letters sit in straight columns (like split ergonomic boards); the right half has
+                // the arrows in the corner. The gap between them grows with the screen (see layoutKeys) and holds
+                // the TrackPoint, in reach of either thumb.
+                val left = listOf(
+                    listOf(esc(1.25f), s("`", "~")) + (0..4).map { digit(it) },
+                    listOf(tab(2.25f)) + letters("qwert"),
+                    listOf(caps(2.25f)) + letters("asdfg"),
+                    listOf(lshift(2.25f)) + letters("zxcvb"),
+                    listOf(ctrl(w = 1.25f), fnKey(1f), win(), alt(w = 1f), space(3f)),
+                )
+                val rightRows = listOf(
+                    (5..9).map { digit(it) } + minus() + equal() + bksp(1.25f),
+                    letters("yuiop") + s("[", "{") + s("]", "}") + s("\\", "|", 1.25f),
+                    letters("hjkl") + s(";", ":") + s("'", "\"") + enter(2.25f),
+                    letters("nm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift(1.25f) + up() + del(),
+                    listOf(space(4.25f), ctrl(true, 1f)) + left() + down() + right(),
+                )
+                left.forEachIndexed { i, r -> g.row(i.toFloat(), 0f, r) }
+                rightRows.forEachIndexed { i, r -> r.forEach { it.right = true }; g.row(i.toFloat(), 0f, r) }
+                splitLeftW = SPLIT_LEFT; splitRightW = SPLIT_RIGHT
+                g.w = SPLIT_LEFT + SPLIT_GAP + SPLIT_RIGHT
+                nubGx = SPLIT_LEFT + SPLIT_GAP / 2; nubGy = 3f
             }
         }
         if (!trackPoint) { nubGx = -1f; nubGy = -1f }
@@ -404,12 +419,22 @@ class KeyboardView(ctx: Context) : View(ctx) {
             for (k in g.keys) k.gy += fh
             g.h += fh
             if (nubGx >= 0) nubGy += fh
-            val n = if (l == KbLayout.PHONE) 12 else 14
-            val w = g.w / n
-            val row = (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Esc", KeyEvent.KEYCODE_ESCAPE, w, small = true, h = fh))) +
-                (1..12).map { Key("F$it", fKey(it), w, small = true, h = fh) } +
-                (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, small = true, h = fh, repeat = true)))
-            g.row(0f, 0f, row)
+            if (l == KbLayout.SPLIT) {
+                // Esc F1–F6 over the left half, F7–F12 Del over the right.
+                val lw = splitLeftW / 7; val rw = splitRightW / 7
+                g.row(0f, 0f, listOf(Key("Esc", KeyEvent.KEYCODE_ESCAPE, lw, small = true, h = fh)) +
+                    (1..6).map { Key("F$it", fKey(it), lw, small = true, h = fh) })
+                g.row(0f, 0f, ((7..12).map { Key("F$it", fKey(it), rw, small = true, h = fh) } +
+                    Key("Del", KeyEvent.KEYCODE_FORWARD_DEL, rw, small = true, h = fh, repeat = true)).onEach { it.right = true })
+                g.w = splitLeftW + SPLIT_GAP + splitRightW
+            } else {
+                val n = if (l == KbLayout.PHONE) 12 else 14
+                val w = g.w / n
+                val row = (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Esc", KeyEvent.KEYCODE_ESCAPE, w, small = true, h = fh))) +
+                    (1..12).map { Key("F$it", fKey(it), w, small = true, h = fh) } +
+                    (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, small = true, h = fh, repeat = true)))
+                g.row(0f, 0f, row)
+            }
         }
         keys = g.keys
         gridW = g.w
@@ -439,13 +464,23 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val gy = 7 * density
         // A pad stays thumb-sized on wide screens: centered, at most 640dp across.
         val side = 3 * density + if (pad != Field.PAD_NONE) max(0f, (width - 640 * density) / 2) else 0f
-        unitW = (width - 2 * side - gx) / gridW
+        val avail = width - 2 * side - gx
+        unitW = avail / gridW
         unitH = (height - gy) / gridH
+        // Split: keys no wider than comfortable for their height, so on a wide screen the halves stay thumb-sized at
+        // the edges and the gap in the middle takes the rest.
+        var rightX = 0f
+        if (splitLeftW > 0f) {
+            unitW = min(unitW, max(unitH * 1.15f, 40 * density))
+            rightX = avail - splitRightW * unitW
+        }
         for (k in keys) {
-            k.rect.set(side + gx + k.gx * unitW, gy + k.gy * unitH, side + (k.gx + k.w) * unitW, (k.gy + k.h) * unitH)
+            val x0 = side + (if (k.right) rightX else 0f)
+            k.rect.set(x0 + gx + k.gx * unitW, gy + k.gy * unitH, x0 + (k.gx + k.w) * unitW, (k.gy + k.h) * unitH)
         }
         if (nubGx >= 0) {
-            nubC.set(side + gx / 2 + nubGx * unitW, gy / 2 + nubGy * unitH)
+            val nx = if (splitLeftW > 0f) side + gx / 2 + (splitLeftW * unitW + rightX) / 2 else side + gx / 2 + nubGx * unitW
+            nubC.set(nx, gy / 2 + nubGy * unitH)
             nubR = minOf(unitW, unitH) * 0.2f
         }
         val ref = minOf(unitH, unitW * 1.1f)
@@ -522,12 +557,52 @@ class KeyboardView(ctx: Context) : View(ctx) {
     private fun usedOneShots() {
         var changed = false
         for (e in modState.entries) if (e.value == ModState.ONESHOT) { e.setValue(ModState.OFF); changed = true }
-        if (changed) redraw()
+        if (changed) { syncMods(); redraw() }
+    }
+
+    /** Modifiers reported down to the listener, with their key codes. */
+    private val sentMods = LinkedHashMap<Key, Int>()
+
+    private fun modCode(k: Key): Int {
+        val m = k.mod
+        return when {
+            m and KeyEvent.META_CTRL_ON != 0 ->
+                if (m and KeyEvent.META_CTRL_RIGHT_ON != 0) KeyEvent.KEYCODE_CTRL_RIGHT else KeyEvent.KEYCODE_CTRL_LEFT
+            m and KeyEvent.META_ALT_ON != 0 ->
+                if (m and KeyEvent.META_ALT_RIGHT_ON != 0) KeyEvent.KEYCODE_ALT_RIGHT else KeyEvent.KEYCODE_ALT_LEFT
+            m and KeyEvent.META_META_ON != 0 -> KeyEvent.KEYCODE_META_LEFT
+            m and KeyEvent.META_SHIFT_ON != 0 ->
+                if (m and KeyEvent.META_SHIFT_RIGHT_ON != 0) KeyEvent.KEYCODE_SHIFT_RIGHT else KeyEvent.KEYCODE_SHIFT_LEFT
+            else -> 0
+        }
+    }
+
+    /**
+     * Tells the listener which modifiers went down or up since last time, so held, latched and locked modifiers
+     * act as real held keys (Alt held while Tab is tapped is Alt+Tab). Ups go out before downs.
+     */
+    private fun syncMods() {
+        val want = keys.filter { k ->
+            k.mod != 0 && ((modState[k] ?: ModState.OFF) != ModState.OFF || modHeld[k] == true)
+        }.toSet()
+        val l = listener
+        val gone = sentMods.keys.filter { it !in want }
+        for (k in gone) {
+            val code = sentMods.remove(k) ?: continue
+            l?.onModifier(code, false, activeMods())
+        }
+        for (k in want) if (k !in sentMods) {
+            val code = modCode(k)
+            if (code == 0) continue
+            sentMods[k] = code
+            l?.onModifier(code, true, activeMods())
+        }
     }
 
     private fun pressModifier(k: Key) {
         modHeld[k] = true
         modUsed.remove(k)
+        syncMods()
     }
 
     private fun releaseModifier(k: Key) {
@@ -544,6 +619,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         }
         // Locking a modifier (second tap) gets a firmer click, like a caps lock clunk.
         if (modState[k] == ModState.LOCKED) Haptics.click()
+        syncMods()
     }
 
     fun releaseEverything() {
@@ -554,6 +630,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         if (delSwipe != null) { delSwipe = null; actions?.onDeleteSwipeEnd(false) }
         removeCallbacks(repeater); repeatKey = null
         pointerKeys.clear(); heldDone.clear(); modState.clear(); modHeld.clear(); modUsed.clear()
+        syncMods()
         redraw()
     }
 
@@ -850,7 +927,10 @@ class KeyboardView(ctx: Context) : View(ctx) {
         const val CODE_LETTERS = -2
         /** The number pad's ABC key: the full keyboard. */
         const val CODE_FULL_KEYBOARD = -3
-        private const val SPLIT_GAP = 2f
+        /** Split: the halves' widths and the smallest gap between them, in key widths. */
+        private const val SPLIT_LEFT = 7.25f
+        private const val SPLIT_RIGHT = 8.25f
+        private const val SPLIT_GAP = 1.5f
         /** How far (dp) the TrackPoint is pushed before the cursor moves. */
         private const val NUB_DEAD_DP = 2.5f
         /** ThinkPad red. */
