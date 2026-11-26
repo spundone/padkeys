@@ -1,0 +1,1 @@
+Themes like PadBridge's (light/dark, PadKeys, wallpaper, custom color, two-tone, pure black). A red TrackPoint nub between G, H and B moves the cursor (Shift to select). Optional F1–F12 function row. With a hardware keyboard, PadKeys stays as a bar of Esc, F-keys, Del, Home, End, PgUp, PgDn. In-app updates from GitHub (settings screen only; adds the internet permission).

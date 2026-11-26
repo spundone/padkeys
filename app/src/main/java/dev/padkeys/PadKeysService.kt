@@ -99,9 +99,27 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
     /** The keyboard stays below the app in landscape too (no full-screen text box). */
     override fun onEvaluateFullscreenMode() = false
 
+    /**
+     * Showing just the bar of extra keys: a hardware keyboard is typing and Android would hide the on-screen keyboard
+     * (its "show virtual keyboard" setting is off; with it on, the full keyboard shows as usual).
+     */
+    private var barMode = false
+
+    /**
+     * Android hides the on-screen keyboard while a hardware keyboard is attached; with [Prefs.hardwareBar] PadKeys
+     * stays, as a bar of the keys hardware keyboards often lack.
+     */
+    override fun onEvaluateInputViewShown(): Boolean {
+        val shown = super.onEvaluateInputViewShown()
+        val bar = !shown && Prefs.hardwareBar
+        if (bar != barMode) { barMode = bar; applySettings() }
+        return shown || bar
+    }
+
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         applySettings()
+        updateInputViewShown() // a hardware keyboard came or went
     }
 
     override fun onStartInputView(editorInfo: EditorInfo, restarting: Boolean) {
@@ -264,8 +282,10 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
 
     override fun onSharedPreferenceChanged(p: SharedPreferences?, key: String?) {
         if (key == "learnedWords" || key == "recentEmoji" || key == "pinnedClips") return // written while typing
+        if (key == "lastUpdateCheck" || key == "skippedUpdate" || key == "autoUpdateCheck") return // the settings app
         if (key == "clipboard" && !Prefs.clipboard) { Clips.clearRecent(); Clips.stop(); showClipOffer() }
         applySettings()
+        if (key == "hardwareBar") updateInputViewShown()
         if (key == "suggestions") { Predict.reset(); refresh() }
     }
 
@@ -284,6 +304,13 @@ class PadKeysService : InputMethodService(), KeyboardView.Listener, SuggestionSt
         root?.oneHanded(Prefs.oneHanded, Prefs.oneHandLeft)
         kb.glide.enabled = Prefs.glide && GlideInput.allowed(info)
         kb.glide.showTrail = Prefs.glideTrail
+        kb.fnRow = Prefs.fnRow
+        kb.trackPoint = Prefs.trackPoint
+        kb.trackPointSpeed = Prefs.trackPointSpeed
+        val bar = barMode
+        if (bar && !kb.hardwareBar) closePanel()
+        kb.hardwareBar = bar
+        root?.barMode(bar)
         root?.invalidateAll()
     }
 
@@ -580,6 +607,11 @@ class KeyboardRoot(
             v.setPadding(0, 0, 0, bottom)
             insets
         }
+    }
+
+    /** Bar mode (hardware keyboard): just the keys, no suggestion strip. */
+    fun barMode(on: Boolean) {
+        strip.visibility = if (on) GONE else VISIBLE
     }
 
     fun invalidateAll() {

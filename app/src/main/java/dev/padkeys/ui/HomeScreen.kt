@@ -38,6 +38,15 @@ import androidx.compose.material.icons.rounded.PanTool
 import androidx.compose.material.icons.rounded.Spellcheck
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Contrast
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Update
+import androidx.activity.compose.LocalActivity
+import dev.padkeys.Updates
+import androidx.compose.material.icons.rounded.DarkMode
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.Mouse
+import androidx.compose.material.icons.rounded.KeyboardAlt
 import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Draw
 import androidx.compose.material.icons.rounded.Gavel
@@ -73,6 +82,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.material3.TopAppBarDefaults
@@ -154,6 +165,7 @@ fun HomeScreen(setupTick: Int) {
                 .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
+            UpdateBanner()
             if (enabled && selected) Ready() else SetupHero(enabled)
             TryIt()
             // Keyed on setupTick: the keyboard's own layout button changes the layout while this screen is open.
@@ -260,7 +272,8 @@ private fun SetupHero(enabled: Boolean) {
             Text(
                 if (enabled) "PadKeys is on. Now pick it as the keyboard you type with."
                 else "Turn on PadKeys in Settings › On-screen keyboards, then pick it. Android warns that a keyboard " +
-                    "can see what you type: PadKeys keeps everything on the phone and has no internet access.",
+                    "can see what you type: PadKeys keeps everything you type on the phone. Its only network use is checking " +
+                    "GitHub for updates, from this screen.",
                 style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center,
             )
             if (!enabled) Button(onClick = { ctx.openKeyboardSettings() }, modifier = Modifier.fillMaxWidth()) {
@@ -408,6 +421,39 @@ private fun KeyboardSettings() {
             "A number or phone pad in number, phone and date fields", pad) { pad = it; Prefs.numberPad = it }
     }
 
+    Section("PC keys") {
+        var fnRow by remember { mutableStateOf(Prefs.fnRow) }
+        SwitchItem(0, 3, Icons.Rounded.KeyboardAlt, "Function row",
+            "Esc and F1–F12 always above the keys, like a laptop's top row, so F-keys don't need Fn", fnRow) {
+            fnRow = it; Prefs.fnRow = it
+        }
+        var hw by remember { mutableStateOf(Prefs.hardwareBar) }
+        SwitchItem(1, 3, Icons.Rounded.Keyboard, "Stay on with a hardware keyboard",
+            "When a keyboard is plugged in or paired, PadKeys stays as a slim bar of Esc, F1–F12, Del and (on wide " +
+                "screens) Home, End, PgUp, PgDn, the keys tablet keyboards often lack", hw) { hw = it; Prefs.hardwareBar = it }
+        var tp by remember { mutableStateOf(Prefs.trackPoint) }
+        var speed by remember { mutableFloatStateOf(Prefs.trackPointSpeed) }
+        SegmentedListItem(
+            onClick = { tp = !tp; Prefs.trackPoint = tp },
+            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.Mouse) },
+            trailingContent = { CheckSwitch(tp) { tp = it; Prefs.trackPoint = it } },
+            supportingContent = {
+                Column {
+                    Text("A red nub between G, H and B, like a ThinkPad's. Push it to move the cursor: further is " +
+                        "faster, up and down by line. Turn Shift on to select. Not on Split")
+                    if (tp) {
+                        Text("Speed · ${(speed * 100).toInt()}%", style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(top = 8.dp))
+                        Slider(value = speed, onValueChange = { speed = it },
+                            onValueChangeFinished = { Prefs.trackPointSpeed = speed }, valueRange = 0.4f..2.5f)
+                    }
+                }
+            },
+        ) { Text("TrackPoint") }
+    }
+
     Section("Typing") {
         var flick by remember { mutableStateOf(Prefs.flick) }
         SwitchItem(0, 7, Icons.Rounded.SwipeUp, "Flick for symbols",
@@ -500,6 +546,8 @@ private fun KeyboardSettings() {
             else "Your phone has no voice typing keyboard turned on, so the button is hidden", mic) { mic = it; Prefs.voiceKey = it }
     }
 
+    ThemeSettings()
+
     Section("Feel and look") {
         var haptics by remember { mutableStateOf(Prefs.haptics) }
         var style by remember { mutableIntStateOf(Prefs.hapticStyle) }
@@ -528,6 +576,117 @@ private fun KeyboardSettings() {
     }
 }
 
+// ---------------------------------------------------------------- theme
+
+/** Theme: light / dark, the palette (PadKeys, wallpaper, custom, two-tone), its colors, pure black. Like PadBridge's. */
+@Composable
+private fun ThemeSettings() {
+    var mode by remember { mutableIntStateOf(Prefs.themeMode) }
+    var palette by remember { mutableIntStateOf(Prefs.palette) }
+    var black by remember { mutableStateOf(Prefs.pureBlack) }
+    var seed by remember { mutableIntStateOf(Prefs.seedColor) }
+    var bg by remember { mutableIntStateOf(Prefs.twoToneBg) }
+    var fg by remember { mutableIntStateOf(Prefs.twoToneFg) }
+    var editing by remember { mutableIntStateOf(0) } // two-tone: 0 background, 1 foreground
+    val canDynamic = android.os.Build.VERSION.SDK_INT >= 31
+    fun changed() { ThemeState.version++ }
+    val twoTone = palette == 3
+    // Rows: theme (not two-tone), colors, seed / two-tone colors / presets, pure black (not two-tone).
+    val count = 2 + (if (palette == 2) 1 else 0) + (if (twoTone) 2 else 0)
+    var i = 0
+    Section("Theme") {
+        if (!twoTone) SegmentedListItem(
+            onClick = {},
+            shapes = ListItemDefaults.segmentedShapes(i++, count),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.DarkMode) },
+            supportingContent = {
+                Choice(listOf("System", "Light", "Dark"), mode) { mode = it; Prefs.themeMode = it; changed() }
+            },
+        ) { Text("Light or dark") }
+        SegmentedListItem(
+            onClick = {},
+            shapes = ListItemDefaults.segmentedShapes(i++, count),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.Palette) },
+            supportingContent = {
+                Column {
+                    Text(when (palette) {
+                        1 -> "Colors from your wallpaper"
+                        2 -> "Pick one color; the whole palette grows from it, light and dark"
+                        3 -> "Just two colors: one behind the keys, one for labels and accents. Light or dark follows the background"
+                        else -> "PadKeys' own blue palette"
+                    })
+                    // Two rows of two: four labels don't fit one row on a phone.
+                    Choice(listOf("PadKeys", "Wallpaper"), if (palette < 2) palette else -1) { p ->
+                        if (p == 1 && !canDynamic) return@Choice
+                        palette = p; Prefs.palette = p; changed()
+                    }
+                    Choice(listOf("Custom", "Two-tone"), if (palette >= 2) palette - 2 else -1) { p ->
+                        palette = p + 2; Prefs.palette = p + 2; changed()
+                    }
+                    if (!canDynamic) Text("Wallpaper colors need Android 12 or later",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
+                }
+            },
+        ) { Text("Colors") }
+        if (palette == 2) SegmentedListItem(
+            onClick = {},
+            shapes = ListItemDefaults.segmentedShapes(i++, count),
+            colors = segColors(),
+            supportingContent = { ColorPicker(seed, onChange = {}, onDone = { seed = it; Prefs.seedColor = it; changed() }) },
+        ) { Text("Seed color") }
+        if (twoTone) {
+            SegmentedListItem(
+                onClick = {},
+                shapes = ListItemDefaults.segmentedShapes(i++, count),
+                colors = segColors(),
+                supportingContent = {
+                    Column {
+                        Choice(listOf("Background", "Foreground"), editing) { editing = it }
+                        val ratio = contrast(bg, fg)
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                            Text(
+                                "Contrast ${"%.1f".format(ratio)}:1" + if (ratio < 4.5f) " · low, labels may be hard to read" else "",
+                                color = if (ratio < 4.5f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = {
+                                val t = bg; bg = fg; fg = t; Prefs.twoToneBg = bg; Prefs.twoToneFg = fg; changed()
+                            }) { Text("Swap") }
+                        }
+                        if (editing == 0) ColorPicker(bg, onChange = {}, onDone = { bg = it; Prefs.twoToneBg = it; changed() })
+                        else ColorPicker(fg, onChange = {}, onDone = { fg = it; Prefs.twoToneFg = it; changed() })
+                    }
+                },
+            ) { Text("Two-tone colors") }
+            SegmentedListItem(
+                onClick = {},
+                shapes = ListItemDefaults.segmentedShapes(i++, count),
+                colors = segColors(),
+                supportingContent = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        for ((b, f) in TwoTonePresets) {
+                            OutlinedButton(
+                                onClick = { bg = b; fg = f; Prefs.twoToneBg = b; Prefs.twoToneFg = f; changed() },
+                                colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(b), contentColor = Color(f)),
+                            ) { Text("Aa") }
+                        }
+                    }
+                },
+            ) { Text("Presets") }
+        } else SwitchItem(i++, count, Icons.Rounded.Contrast, "Pure black",
+            "True black behind the keys in dark mode, easier on OLED screens and battery", black) {
+            black = it; Prefs.pureBlack = it; changed()
+        }
+    }
+}
+
+private val TwoTonePresets = listOf(
+    0xFF0B1F33 to 0xFFFFC857, 0xFF000000 to 0xFFFFFFFF, 0xFF000000 to 0xFF39FF14, 0xFFF4EFE6 to 0xFF1F3A5F,
+    0xFF1B0B2E to 0xFFFF6AD5, 0xFFFFF4E0 to 0xFFC0392B, 0xFF0F2A1D to 0xFFB8F2C9, 0xFF101010 to 0xFFFF7A50,
+).map { (a, b) -> a.toInt() to b.toInt() }
+
 // ---------------------------------------------------------------- about
 
 @Composable
@@ -536,24 +695,35 @@ private fun About() {
     Section("About") {
         SegmentedListItem(
             onClick = {},
-            shapes = ListItemDefaults.segmentedShapes(0, 3),
+            shapes = ListItemDefaults.segmentedShapes(0, 5),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.Info) },
             supportingContent = {
-                Text("PadBridge's keyboard as your phone's keyboard. Colors follow your wallpaper and light / dark " +
-                    "mode. No internet access; nothing leaves the phone.")
+                Text("PadBridge's keyboard as your phone's keyboard. What you type never leaves the phone: the only " +
+                    "network use is checking GitHub for updates, from this screen.")
             },
         ) { Text("PadKeys ${BuildConfig.VERSION_NAME}") }
+        val activity = LocalActivity.current
+        SegmentedListItem(
+            onClick = { activity?.let { onUpdateRowClick(it) } },
+            shapes = ListItemDefaults.segmentedShapes(1, 5),
+            colors = segColors(),
+            leadingContent = { Badge(Icons.Rounded.SystemUpdate) },
+            supportingContent = { Text(updateSubtitle(Updates.state)) },
+        ) { Text("Check for updates") }
+        var auto by remember { mutableStateOf(Prefs.autoUpdateCheck) }
+        SwitchItem(2, 5, Icons.Rounded.Update, "Check automatically",
+            "Look for a new version once a day when you open this screen", auto) { auto = it; Prefs.autoUpdateCheck = it }
         SegmentedListItem(
             onClick = {},
-            shapes = ListItemDefaults.segmentedShapes(1, 3),
+            shapes = ListItemDefaults.segmentedShapes(3, 5),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.MenuBook) },
             supportingContent = { Text("From wordfreq by Robyn Speer, CC BY-SA 4.0. Corrections come from your phone's spell checker.") },
         ) { Text("Word list") }
         SegmentedListItem(
             onClick = { licenses = true },
-            shapes = ListItemDefaults.segmentedShapes(2, 3),
+            shapes = ListItemDefaults.segmentedShapes(4, 5),
             colors = segColors(),
             leadingContent = { Badge(Icons.Rounded.Gavel) },
             supportingContent = { Text("Apache License 2.0, and the libraries PadKeys uses") },

@@ -10,9 +10,15 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.graphics.PointF
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.sin
 
 /** On-screen keyboard layouts (a subset of PadBridge's: the ones that make sense for typing into this phone). */
 enum class KbLayout(val label: String, val blurb: String) {
@@ -165,6 +171,46 @@ class KeyboardView(ctx: Context) : View(ctx) {
     /** Glide typing on the letter keys: gesture tracking, decoding, trail (see Glide.kt). */
     val glide = Glide(this) { keys }
 
+    /** A slim Esc / F1–F12 row above the keys (not on Full, which has one). */
+    var fnRow = false
+        set(v) { if (field != v) { field = v; rebuild() } }
+    /** A hardware keyboard is attached: show only a bar of the keys it may lack (Esc, F-keys, Del, Home…). */
+    var hardwareBar = false
+        set(v) { if (field != v) { field = v; rebuild() } }
+    /** A TrackPoint between G, H and B that moves the text cursor. */
+    var trackPoint = true
+        set(v) { if (field != v) { field = v; rebuild() } }
+    var trackPointSpeed = 1f
+
+    // TrackPoint: a pointing stick at the corner of G, H and B. Push it and the cursor moves at a speed set by how far
+    // you push (left / right by character, up / down by line); with Shift on it selects.
+    private var nubGx = -1f
+    private var nubGy = -1f
+    private val nubC = PointF()
+    private var nubR = 0f
+    private var nubId = -1
+    private val nubOrigin = PointF()
+    private val nubAt = PointF()
+    private var nubDetent = 0
+    private var nubAccX = 0f
+    private var nubAccY = 0f
+    private var nubMoved = false
+    private var nubLast = 0L
+    private val nubPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val nubLoop = object : Runnable {
+        override fun run() {
+            if (nubId < 0) return
+            nubStep()
+            postOnAnimation(this)
+        }
+    }
+
+    private fun rebuild() {
+        if (keys.isEmpty()) return
+        releaseEverything()
+        build(); layoutKeys(); requestLayout(); redraw()
+    }
+
     init { isHapticFeedbackEnabled = false }
 
     fun configure(l: KbLayout) {
@@ -248,6 +294,17 @@ class KeyboardView(ctx: Context) : View(ctx) {
         fun del(w: Float = 1f) = sm("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, repeat = true)
         fun letters(str: String) = str.map { lt(it) }
 
+        nubGx = -1f; nubGy = -1f
+        if (hardwareBar) {
+            // With a hardware keyboard: one row of what tablet and folio keyboards often lack.
+            val wide = resources.displayMetrics.run { widthPixels / density } >= 600
+            val list = listOf(esc()) + (1..12).map { sm("F$it", fKey(it)) } + del() +
+                if (wide) listOf(sm("Home", KeyEvent.KEYCODE_MOVE_HOME), sm("End", KeyEvent.KEYCODE_MOVE_END),
+                    sm("PgUp", KeyEvent.KEYCODE_PAGE_UP), sm("PgDn", KeyEvent.KEYCODE_PAGE_DOWN)) else emptyList()
+            val g = Grid().row(0f, 0f, list)
+            keys = g.keys; gridW = g.w; gridH = g.h
+            return
+        }
         if (pad != Field.PAD_NONE) {
             keys = NumPad.keys(pad, enter(1f))
             gridW = 5f; gridH = NumPad.ROWS
@@ -274,6 +331,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                     g.row(y + 3, 0f, listOf(lshift(1.5f)) + letters("zxcvbnm") + bksp(1.5f))
                     g.row(y + 4, 0f, listOf(sm("?123", CODE_SYMBOLS, 1.5f), s(",", "!"), s("'", "\""), space(4f),
                         s(".", "?"), enter(1.5f)))
+                    nubGx = 5.5f; nubGy = y + 3 // the corner of G, H, V and B
                 } else {
                     fun row(str: String) = str.map { s(it.toString(), null) }
                     g.row(y, 0f, row("1234567890"))
@@ -292,6 +350,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 g.row(3f, 0f, listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift())
                 g.row(4f, 0f, listOf(ctrl(), fnKey(1.25f), alt(), space(5.25f), alt(true, 1f), ctrl(true, 1f),
                     left(), up(), down(), right()))
+                nubGx = 6.75f; nubGy = 3f
             }
             KbLayout.FULL -> {
                 g.row(0f, 0f, listOf(esc()) + (1..12).map { sm("F$it", fKey(it)) } + del(2f))
@@ -301,6 +360,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 g.row(4f, 0f, listOf(lshift()) + letters("zxcvbnm") + s(",", "<") + s(".", ">") + s("/", "?") + rshift())
                 g.row(5f, 0f, listOf(ctrl(), fnKey(1.25f), alt(), space(5.25f), alt(true, 1f), ctrl(true, 1f),
                     left(), up(), down(), right()))
+                nubGx = 6.75f; nubGy = 4f
             }
             KbLayout.COMPACT_65, KbLayout.SPLIT -> {
                 // Rows of a 65% board, each as (left half, right half) so Split can pull them apart.
@@ -322,6 +382,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                         val rightW = b.sumOf { it.w.toDouble() }.toFloat()
                         g.row(i.toFloat(), 0f, if (bottom) a + space(16f - leftW - rightW) + b else a + b)
                     }
+                    nubGx = 6.75f; nubGy = 3f
                 } else {
                     val leftMax = 7.25f
                     val rightMax = 9.5f
@@ -336,6 +397,20 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 }
             }
         }
+        if (!trackPoint) { nubGx = -1f; nubGy = -1f }
+        // Function row: Esc and F1–F12 across the top (Phone has Esc in its toolbar, so just the F-keys there).
+        if (fnRow && l != KbLayout.FULL) {
+            val fh = if (l == KbLayout.PHONE) 0.7f else 0.75f
+            for (k in g.keys) k.gy += fh
+            g.h += fh
+            if (nubGx >= 0) nubGy += fh
+            val n = if (l == KbLayout.PHONE) 12 else 14
+            val w = g.w / n
+            val row = (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Esc", KeyEvent.KEYCODE_ESCAPE, w, small = true, h = fh))) +
+                (1..12).map { Key("F$it", fKey(it), w, small = true, h = fh) } +
+                (if (l == KbLayout.PHONE) emptyList() else listOf(Key("Del", KeyEvent.KEYCODE_FORWARD_DEL, w, small = true, h = fh, repeat = true)))
+            g.row(0f, 0f, row)
+        }
         keys = g.keys
         gridW = g.w
         gridH = g.h
@@ -349,7 +424,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         // Rows are a comfortable thumb height; the whole keyboard never takes more than about half the screen,
         // so the app keeps room for the text being typed.
-        val rowDp = if (pad != Field.PAD_NONE) 60f else if (layout == KbLayout.PHONE) 56f else 48f
+        val rowDp = if (hardwareBar) 44f else if (pad != Field.PAD_NONE) 60f else if (layout == KbLayout.PHONE) 56f else 48f
         val want = gridH * rowDp * density * heightScale
         val cap = screenH * min(0.65f, (if (landscape) 0.5f else 0.48f) * heightScale)
         setMeasuredDimension(w, min(want, max(cap, 120 * density)).toInt())
@@ -368,6 +443,10 @@ class KeyboardView(ctx: Context) : View(ctx) {
         unitH = (height - gy) / gridH
         for (k in keys) {
             k.rect.set(side + gx + k.gx * unitW, gy + k.gy * unitH, side + (k.gx + k.w) * unitW, (k.gy + k.h) * unitH)
+        }
+        if (nubGx >= 0) {
+            nubC.set(side + gx / 2 + nubGx * unitW, gy / 2 + nubGy * unitH)
+            nubR = minOf(unitW, unitH) * 0.2f
         }
         val ref = minOf(unitH, unitW * 1.1f)
         labelPaint.textSize = (ref * 0.44f).coerceAtMost(25 * density)
@@ -468,6 +547,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
     }
 
     fun releaseEverything() {
+        if (nubId >= 0) { nubId = -1; removeCallbacks(nubLoop) }
         glide.cancel()
         pending.values.forEach { removeCallbacks(it.hold) }; pending.clear()
         popup = null
@@ -509,6 +589,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 val pid = e.getPointerId(i)
                 // Other fingers are ignored while one glides.
                 if (glide.active) return true
+                if (nubId < 0 && nubHit(e.getX(i), e.getY(i))) { nubDown(pid, e.getX(i), e.getY(i)); redraw(); return true }
                 val k = keyAt(e.getX(i), e.getY(i)) ?: return true
                 // A new key types whatever is still waiting first, so fast rollover keeps its order.
                 if (!k.isModifier) flushPending()
@@ -530,12 +611,14 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 }
             }
             MotionEvent.ACTION_MOVE -> for (i in 0 until e.pointerCount) {
+                if (e.getPointerId(i) == nubId) { nubAt.set(e.getX(i), e.getY(i)); continue }
                 popup?.let { pp -> if (pp.pid == e.getPointerId(i) && pp.move(e.getX(i), e.getY(i))) Haptics.soft(0.4f) }
                 val p = pending[e.getPointerId(i)] ?: continue
                 movePending(p, e.getX(i), e.getY(i))
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 val pid = e.getPointerId(e.actionIndex)
+                if (pid == nubId) nubUp()
                 heldDone.remove(pid)
                 popup?.takeIf { it.pid == pid }?.let { commitPopup(it) }
                 pending.remove(pid)?.let { if (it.glide) finishGlide() else { if (glide.tracking) glide.cancel(); commit(it) } }
@@ -570,6 +653,78 @@ class KeyboardView(ctx: Context) : View(ctx) {
             p.flicked = flick && up > max(16 * density, unitH * 0.4f) && up > abs(x - p.x0)
             if (p.flicked != was) Haptics.soft(0.6f) // felt as it switches to (or back from) the shifted character
         }
+    }
+
+    // ------------------------------------------------------------------ TrackPoint
+
+    private fun nubHit(x: Float, y: Float) = nubGx >= 0 && hypot(x - nubC.x, y - nubC.y) <= nubR * 2.2f
+
+    private fun nubDown(pid: Int, x: Float, y: Float) {
+        flushPending()
+        nubId = pid; nubOrigin.set(x, y); nubAt.set(x, y)
+        nubDetent = 0; nubAccX = 0f; nubAccY = 0f; nubMoved = false
+        nubLast = System.nanoTime()
+        Haptics.soft(0.3f)
+        postOnAnimation(nubLoop)
+    }
+
+    /**
+     * One frame of TrackPoint motion: the cursor speed grows faster than linearly with how far the finger pushed.
+     * Sideways moves by character, up and down by line (slower); a push that's mostly one way ignores the other.
+     */
+    private fun nubStep() {
+        val now = System.nanoTime()
+        val dt = ((now - nubLast) / 1e9f).coerceIn(0f, 0.05f)
+        nubLast = now
+        val dx = nubAt.x - nubOrigin.x; val dy = nubAt.y - nubOrigin.y
+        val d = hypot(dx, dy) / density
+        val push = d - NUB_DEAD_DP
+        // Faint detents as the push gets firmer, so you can feel how hard you're pushing.
+        val detent = (max(0f, push) / 6f).toInt().coerceAtMost(4)
+        if (detent > nubDetent) Haptics.soft(0.2f + 0.08f * detent)
+        nubDetent = detent
+        if (push <= 0f) { nubAccX = 0f; nubAccY = 0f; return }
+        // A modifier held while using the stick was used (Shift-select): it doesn't turn one-shot.
+        modHeld.filterValues { it }.keys.forEach { modUsed.add(it) }
+        val speed = 0.8f * push.pow(1.3f) * trackPointSpeed // characters per second
+        val ux = dx / (d * density); val uy = dy / (d * density)
+        if (abs(ux) >= abs(uy) * 0.4f) nubAccX += ux * speed * dt else nubAccX = 0f
+        if (abs(uy) >= abs(ux) * 0.4f) nubAccY += uy * speed * 0.4f * dt else nubAccY = 0f
+        var steps = 0
+        while (abs(nubAccX) >= 1f && steps < 4) {
+            nubCursor(if (nubAccX > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT)
+            nubAccX -= if (nubAccX > 0) 1f else -1f; steps++
+        }
+        while (abs(nubAccY) >= 1f && steps < 4) {
+            nubCursor(if (nubAccY > 0) KeyEvent.KEYCODE_DPAD_DOWN else KeyEvent.KEYCODE_DPAD_UP)
+            nubAccY -= if (nubAccY > 0) 1f else -1f; steps++
+        }
+        if (steps > 0) redraw()
+    }
+
+    private fun nubCursor(code: Int) {
+        nubMoved = true
+        listener?.onCursor(code, activeMods())
+    }
+
+    private fun nubUp() {
+        nubId = -1
+        removeCallbacks(nubLoop)
+        // A one-shot Shift (or Ctrl) applied to the whole push: used up now.
+        if (nubMoved) usedOneShots()
+    }
+
+    private fun drawNub(c: Canvas) {
+        if (nubGx < 0) return
+        // Drawn over the corners of the keys around it; it leans the way it's pushed.
+        val lean = if (nubId >= 0) min(1f, hypot(nubAt.x - nubOrigin.x, nubAt.y - nubOrigin.y) / (24 * density)) else 0f
+        val ang = atan2(nubAt.y - nubOrigin.y, nubAt.x - nubOrigin.x)
+        val cx = nubC.x + cos(ang) * lean * nubR * 0.6f
+        val cy = nubC.y + sin(ang) * lean * nubR * 0.6f
+        nubPaint.color = C.BG
+        c.drawCircle(nubC.x, nubC.y, nubR * 1.35f, nubPaint)
+        nubPaint.color = NUB_RED
+        c.drawCircle(cx, cy, nubR * (if (nubId >= 0) 1.1f else 1f), nubPaint)
     }
 
     private fun cursor(code: Int) {
@@ -696,6 +851,10 @@ class KeyboardView(ctx: Context) : View(ctx) {
         /** The number pad's ABC key: the full keyboard. */
         const val CODE_FULL_KEYBOARD = -3
         private const val SPLIT_GAP = 2f
+        /** How far (dp) the TrackPoint is pushed before the cursor moves. */
+        private const val NUB_DEAD_DP = 2.5f
+        /** ThinkPad red. */
+        private const val NUB_RED = 0xFFE2231A.toInt()
         /** Placeholder label for Enter; replaced by [enterLabel] when drawn. */
         private const val ENTER = "\u0000enter"
         /** How long a released key takes to ease back from its pressed shape. */
@@ -895,6 +1054,7 @@ class KeyboardView(ctx: Context) : View(ctx) {
                 c.drawText(k.shiftLabel, k.rect.right - hintPaint.textSize * 0.75f, k.rect.top + hintPaint.textSize + 3 * density, hintPaint)
             }
         }
+        drawNub(c)
         if (animating) postInvalidateOnAnimation() else lastFrame = 0L
         glide.draw(c)
     }

@@ -6,6 +6,21 @@ All notable changes to PadKeys are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.2.0] – 2026-11-26
+
+### Added
+- Themes, as in PadBridge: light or dark (or follow the system); colors from PadKeys' palette, the wallpaper, a
+  custom palette grown from one picked color, or two-tone (background and foreground, presets, contrast warning);
+  pure black in dark mode. The settings screen uses the same theme as the keys.
+- TrackPoint: a red nub at the corner of G, H and B on Phone, Laptop, 65% and Full. Push it to move the text cursor
+  (speed grows with the push, up / down by line); with Shift on it selects. Speed setting; can be turned off.
+- Function row setting: Esc and F1–F12 in a slim row above the keys on every layout (Full already has one).
+- In-app updates: Settings › About › "Check for updates", and a daily check when the settings screen opens (can be
+  turned off). Downloads the release APK from GitHub, verifies its SHA-256 and signing key, and opens Android's
+  installer. PadKeys now has the INTERNET permission for this only; the keyboard itself never goes online.
+- With a hardware keyboard attached (and Android's "show on-screen keyboard" off), PadKeys stays on screen as a bar
+  of Esc, F1–F12, Del and, on wide screens, Home, End, PgUp, PgDn. On by default; can be turned off.
+
 ## [1.1.0] – 2026-11-24
 
 ### Added

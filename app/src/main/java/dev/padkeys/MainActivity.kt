@@ -23,9 +23,13 @@ class MainActivity : ComponentActivity() {
         setContent { PadKeysTheme { HomeScreen(setupTick.intValue) } }
     }
 
+    private var updateChecked = false
+
     override fun onResume() {
         super.onResume()
         setupTick.intValue++
+        if (!updateChecked) { updateChecked = true; Updater.autoCheck(this) }
+        if (Updates.state is UpdateState.Failed) Updates.state = UpdateState.Idle
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

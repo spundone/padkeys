@@ -16,4 +16,4 @@ Completions from a built-in list of 40,000 common English words and corrections 
 Material 3 Expressive keys that morph when pressed, colors from your wallpaper, light and dark, an optional realistic hardware look, and haptics tuned for phone and tablet motors.
 
 <b>Private</b>
-PadKeys has no internet permission. Nothing you type leaves the phone.
+Nothing you type leaves the phone. The internet permission is used only by the settings screen to check GitHub for updates.

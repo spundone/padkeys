@@ -44,17 +44,25 @@ on-screen keyboard. It keeps that keyboard's feel and types into this phone's ap
 - Material 3 Expressive look: rounded tonal keys that morph toward a pill when pressed, a primary-color Enter with
   drawn action icons, a flat toolbar row, Google Sans where the phone has it; the settings app uses a collapsing
   large top bar, grouped list items and connected toggle groups.
-- Haptics (Auto / Rich / Basic), key preview bubbles, colors from the wallpaper and light / dark mode, optional
-  "Realistic" hardware look.
+- **TrackPoint:** a red nub between G, H and B (all layouts but Split). Push it to move the cursor, faster the
+  further you push, up and down by line; with Shift on it selects.
+- **PC keys:** an optional function row (Esc, F1–F12) above every layout, and with a hardware keyboard attached
+  PadKeys stays on screen as a slim bar of Esc, F1–F12, Del and (on wide screens) Home, End, PgUp, PgDn.
+- Themes like PadBridge's: system / light / dark; PadKeys blue, wallpaper, a custom palette grown from one color, or
+  two-tone (two colors, with presets and a contrast check); pure black for OLED; optional "Realistic" hardware look.
+- Haptics (Auto / Rich / Basic) and key preview bubbles.
 
-PadKeys has no internet permission.
+Nothing you type leaves the phone. Since 1.2.0 PadKeys has the internet permission for one thing only: in-app
+updates. The settings screen (never the keyboard) checks GitHub's latest release at most once a day (or when you
+tap "Check for updates"; the daily check can be turned off), downloads the APK, verifies its checksum and signing
+key, and hands it to Android's installer.
 
 ## Install
 
 Download the APK from [Releases](https://github.com/spundone/padkeys/releases/latest), install it, open PadKeys
-and follow the two setup steps (turn it on in Settings › On-screen keyboards, then pick it). PadKeys has no internet
-permission, so it doesn't update itself: watch the releases, or add the repo to
-[Obtainium](https://github.com/ImranR98/Obtainium) for automatic updates.
+and follow the two setup steps (turn it on in Settings › On-screen keyboards, then pick it). From 1.2.0 on,
+PadKeys updates itself (Settings › About › Check for updates). Versions before 1.2.0 can't, so install 1.2.0 by
+hand once.
 
 Also by the same author: [PadBridge](https://github.com/spundone/padbridge) turns your phone into a Bluetooth
 trackpad, keyboard, remote and gamepad for your computer or TV.

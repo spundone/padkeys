@@ -16,6 +16,9 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
@@ -92,32 +95,67 @@ private fun ColorScheme.neutral(dark: Boolean): ColorScheme = if (dark) copy(
 )
 
 /**
- * The color scheme for [dark]: wallpaper colors on Android 12+ (dynamic color), PadKeys' palette before that. Not a
- * composable, so the keyboard service (which has no Compose UI) uses the same colors as the settings screen.
+ * AMOLED: true-black background. Containers are the palette's own (tinted) containers pulled toward black, so keys
+ * keep the theme's hue instead of turning flat grey, and still step up clearly from the background.
  */
-fun schemeFor(ctx: Context, dark: Boolean): ColorScheme = when {
-    Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    dark -> BrandDark
-    else -> BrandLight
+private fun ColorScheme.pureBlack(): ColorScheme {
+    fun dim(c: Color, keep: Float) = androidx.compose.ui.graphics.lerp(Color.Black, c, keep)
+    return copy(
+        background = Color.Black, surface = Color.Black, surfaceDim = Color.Black,
+        surfaceContainerLowest = Color.Black,
+        surfaceContainerLow = dim(surfaceContainerLow, 0.62f),
+        surfaceContainer = dim(surfaceContainer, 0.72f),
+        surfaceContainerHigh = dim(surfaceContainerHigh, 0.8f),
+        surfaceContainerHighest = dim(surfaceContainerHighest, 0.86f),
+        surfaceBright = dim(surfaceBright, 0.86f),
+    )
 }
 
-/** The system is in dark mode (the keyboard follows the system, like the apps it types into). */
+/** Bumped by the settings screen so a theme change applies to it at once (the keyboard listens to the prefs). */
+object ThemeState {
+    var version by mutableIntStateOf(0)
+}
+
+/** The system is in dark mode. */
 fun Context.isDark() =
     resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
-/** Sets the keyboard's view colors ([C], [Real]) from the system's light / dark mode and wallpaper. */
+/** Dark or light, from the theme setting: two-tone by its background, otherwise the setting or the system. */
+fun Context.themeDark(): Boolean = if (Prefs.palette == 3) Color(Prefs.twoToneBg).luminance() < 0.5f
+else when (Prefs.themeMode) { 1 -> false; 2 -> true; else -> isDark() }
+
+/**
+ * The color scheme from the theme settings: PadKeys' palette, wallpaper colors (Android 12+), a palette grown from a
+ * picked color, or two colors; then pure black if asked. Not a composable, so the keyboard service (which has no
+ * Compose UI) uses the same colors as the settings screen.
+ */
+fun schemeFor(ctx: Context, dark: Boolean = ctx.themeDark()): ColorScheme {
+    val palette = Prefs.palette
+    val s = when {
+        palette == 3 -> twoToneScheme(Prefs.twoToneBg, Prefs.twoToneFg)
+        palette == 2 -> seedScheme(Prefs.seedColor, dark)
+        palette == 1 && Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        dark -> BrandDark
+        else -> BrandLight
+    }
+    return if (dark && palette != 3 && Prefs.pureBlack) s.pureBlack() else s
+}
+
+/** Sets the keyboard's view colors ([C], [Real]) from the theme settings and the system's light / dark mode. */
 fun applyKeyboardColors(ctx: Context) {
-    val dark = ctx.isDark()
+    val dark = ctx.themeDark()
     Real.on = Prefs.realistic
     Real.dark = dark
     syncViewColors(schemeFor(ctx, dark).let { if (Real.on) it.neutral(dark) else it })
 }
 
-/** Material 3 Expressive theme for the settings screen: wallpaper or PadKeys colors, following the system. */
+/** Material 3 Expressive theme for the settings screen, in the same colors as the keyboard. */
 @Composable
 fun PadKeysTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    ThemeState.version // recompose on theme changes
+    isSystemInDarkTheme() // and when the system switches
     val ctx = LocalContext.current
+    val dark = ctx.themeDark()
     val scheme = schemeFor(ctx, dark)
     SideEffect {
         // Status/navigation bar icons follow the mode.
@@ -130,7 +168,8 @@ fun PadKeysTheme(content: @Composable () -> Unit) {
 
 /** The Canvas-drawn keyboard and suggestion strip read their colors from [C]. */
 internal fun syncViewColors(s: ColorScheme) {
-    C.BG = s.surfaceContainer.toArgb()
+    // Pure black keeps the background black; otherwise the keys sit on the container tone, like Gboard.
+    C.BG = (if (s.surface == Color.Black) s.surface else s.surfaceContainer).toArgb()
     C.SURFACE = s.surfaceContainer.toArgb()
     C.SURFACE2 = s.surfaceContainerHigh.toArgb()
     C.SURFACE3 = s.surfaceContainerHighest.toArgb()

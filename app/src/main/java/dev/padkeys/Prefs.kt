@@ -48,6 +48,32 @@ object Prefs {
         get() = bool("numberPad", true)
         set(v) = putBool("numberPad", v)
 
+    /**
+     * A slim row of Esc and F1–F12 above the keys on every layout (Full has its own). F-keys then don't need Fn, like
+     * a hardware keyboard's top row.
+     */
+    var fnRow: Boolean
+        get() = bool("fnRow", false)
+        set(v) = putBool("fnRow", v)
+
+    /**
+     * With a hardware keyboard attached, PadKeys stays on screen as a bar of the keys it may lack (Esc, F1–F12, Del,
+     * Home, End, PgUp, PgDn) instead of hiding.
+     */
+    var hardwareBar: Boolean
+        get() = bool("hardwareBar", true)
+        set(v) = putBool("hardwareBar", v)
+
+    /** A TrackPoint between G, H and B that moves the text cursor (Shift held: selects). */
+    var trackPoint: Boolean
+        get() = bool("trackPoint", true)
+        set(v) = putBool("trackPoint", v)
+
+    /** TrackPoint speed, a multiple of the default (0.4–2.5). */
+    var trackPointSpeed: Float
+        get() = p.getFloat("trackPointSpeed", 1f)
+        set(v) = p.edit().putFloat("trackPointSpeed", v).apply()
+
     // ---------------------------------------------------------------- typing
 
     /** Flick up on a key (or hold it) to type its shifted character. */
@@ -154,6 +180,52 @@ object Prefs {
     var hapticStyle: Int
         get() = p.getInt("hapticStyle", 0)
         set(v) = p.edit().putInt("hapticStyle", v).apply()
+
+    /** 0 follow the system, 1 light, 2 dark. */
+    var themeMode: Int
+        get() = p.getInt("themeMode", 0)
+        set(v) = p.edit().putInt("themeMode", v).apply()
+
+    /**
+     * Colors: 0 PadKeys' blue palette, 1 wallpaper (Android 12+), 2 a palette grown from [seedColor], 3 two-tone
+     * ([twoToneBg] and [twoToneFg] only). Wallpaper by default where the phone has it.
+     */
+    var palette: Int
+        get() = p.getInt("palette", if (android.os.Build.VERSION.SDK_INT >= 31) 1 else 0)
+        set(v) = p.edit().putInt("palette", v).apply()
+
+    var seedColor: Int
+        get() = p.getInt("seedColor", 0xFF3E64E5.toInt())
+        set(v) = p.edit().putInt("seedColor", v).apply()
+
+    var twoToneBg: Int
+        get() = p.getInt("twoToneBg", 0xFF0B1F33.toInt())
+        set(v) = p.edit().putInt("twoToneBg", v).apply()
+
+    var twoToneFg: Int
+        get() = p.getInt("twoToneFg", 0xFFFFC857.toInt())
+        set(v) = p.edit().putInt("twoToneFg", v).apply()
+
+    /** True black behind the keys in dark mode (OLED). */
+    var pureBlack: Boolean
+        get() = bool("pureBlack", false)
+        set(v) = putBool("pureBlack", v)
+
+    // ---------------------------------------------------------------- updates
+
+    /** Look for a new GitHub release at most once a day when the settings app opens (never from the keyboard). */
+    var autoUpdateCheck: Boolean
+        get() = bool("autoUpdateCheck", true)
+        set(v) = putBool("autoUpdateCheck", v)
+
+    var lastUpdateCheck: Long
+        get() = p.getLong("lastUpdateCheck", 0L)
+        set(v) = p.edit().putLong("lastUpdateCheck", v).apply()
+
+    /** A version the user dismissed; the banner stays hidden until a newer one appears. */
+    var skippedUpdate: String?
+        get() = p.getString("skippedUpdate", null)
+        set(v) = p.edit().putString("skippedUpdate", v).apply()
 
     /** Keys drawn as hardware: silver key caps in light mode, space black in dark. */
     var realistic: Boolean
